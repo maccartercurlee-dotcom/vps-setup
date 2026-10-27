@@ -6,7 +6,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== Начинаю установку (с автоопределением путей из БД) ===${NC}"
+echo -e "${YELLOW}=== Начинаю установку (со случайными путями) ===${NC}"
 
 # 1. Ввод данных
 read -p "Введите ваш домен (или оставьте пустым для IP): " DOMAIN
@@ -76,24 +76,33 @@ else
     CERT_PATH="/etc/ssl/self-signed/fullchain.pem"; KEY_PATH="/etc/ssl/self-signed/privkey.pem"
 fi
 
-# 6. Установка 3x-ui
-echo -e "${YELLOW}[5/7] Установка 3x-ui...${NC}"
+# 6. Генерация случайных путей и установка 3x-ui
+echo -e "${YELLOW}[5/7] Генерация секретных путей и установка 3x-ui...${NC}"
+
+# Генерируем случайные строки из 12 символов (буквы и цифры)
+RAND_PANEL_STR=$(head /dev/urandom | tr -dc a-z0-9 | head -c 12)
+RAND_SUB_STR=$(head /dev/urandom | tr -dc a-z0-9 | head -c 12)
+
+# Устанавливаем переменные для установщика (с ведущим и замыкающим слэшем для 3x-ui)
 export XUI_DB_TYPE=sqlite
 export XUI_DB_FOLDER=/etc/x-ui
 export XUI_PORT=55000
 export XUI_SUB_PORT=56000
-# Временный путь, чтобы панель запустилась и создала БД
-export XUI_INIT_WEB_BASE_PATH=/panel/ 
+export XUI_INIT_WEB_BASE_PATH="/$RAND_PANEL_STR/"
 
 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
 
 sleep 5
 x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
 
+# Принудительно задаем пути в базе данных на всякий случай (если CLI не сработал)
+sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/$RAND_PANEL_STR/' WHERE key='webBasePath';" 2>/dev/null || true
+sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/$RAND_SUB_STR/' WHERE key='subPath';" 2>/dev/null || true
+
 # 7. ИЗВЛЕЧЕНИЕ ПУТЕЙ ИЗ БД И НАСТРОЙКА NGINX
 echo -e "${YELLOW}[6/7] Чтение путей из базы данных SQLite...${NC}"
 
-# Функция для получения значения из БД (с фолбэком, если ключа нет)
+# Функция для получения значения из БД
 get_setting() {
     local key=$1
     local default=$2
@@ -101,15 +110,15 @@ get_setting() {
     if [ -z "$val" ]; then echo "$default"; else echo "$val"; fi
 }
 
-# Получаем пути (нормализуем: добавляем ведущий / и убираем завершающий /)
-WEB_BASE_RAW=$(get_setting "webBasePath" "/panel/")
-SUB_PATH_RAW=$(get_setting "subPath" "/sub/")
+WEB_BASE_RAW=$(get_setting "webBasePath" "/$RAND_PANEL_STR/")
+SUB_PATH_RAW=$(get_setting "subPath" "/$RAND_SUB_STR/")
 
-WEB_BASE_PATH=$(echo "$WEB_BASE_RAW" | sed 's|^[^/]|/&|; s|/*$||')/
-SUB_PATH=$(echo "$SUB_PATH_RAW" | sed 's|^[^/]|/&|; s|/*$||')/
+# Нормализация: убираем завершающий слэш для Nginx (например, /x7f9k2m1p4q8)
+WEB_BASE_PATH=$(echo "$WEB_BASE_RAW" | sed 's|/*$||')
+SUB_PATH=$(echo "$SUB_PATH_RAW" | sed 's|/*$||')
 
-echo -e "Найден путь панели: ${GREEN}$WEB_BASE_PATH${NC}"
-echo -e "Найден путь подписки: ${GREEN}$SUB_PATH${NC}"
+echo -e "Путь панели: ${GREEN}$WEB_BASE_PATH${NC}"
+echo -e "Путь подписки: ${GREEN}$SUB_PATH${NC}"
 
 # 8. Финальный конфиг Nginx
 echo -e "${YELLOW}[7/7] Настройка Nginx с динамическими путями...${NC}"
@@ -129,8 +138,8 @@ server {
 
     location / { root /var/www/decoy; index index.html; }
 
-    # Панель (путь берется из БД 3x-ui)
-    location $WEB_BASE_PATH {
+    # Панель (секретный путь из БД)
+    location $WEB_BASE_PATH/ {
         proxy_pass http://127.0.0.1:55000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -142,8 +151,8 @@ server {
         proxy_read_timeout 3600s;
     }
 
-    # Подписки (путь берется из БД 3x-ui)
-    location $SUB_PATH {
+    # Подписки (секретный путь из БД)
+    location $SUB_PATH/ {
         proxy_pass http://127.0.0.1:56000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -166,9 +175,9 @@ echo -e "${GREEN}========================================${NC}"
 echo -e "Логин: ${YELLOW}$PANEL_USER${NC}"
 echo -e "Пароль: ${YELLOW}$PANEL_PASS${NC}"
 echo -e ""
-echo -e "${GREEN}АКТУАЛЬНЫЕ ПУТИ (из БД):${NC}"
-echo -e "Панель:    ${YELLOW}https://$URL_HOST$WEB_BASE_PATH${NC}"
-echo -e "Подписки:  ${YELLOW}https://$URL_HOST$SUB_PATH${NC}"
+echo -e "${GREEN}СЕКРЕТНЫЕ ПУТИ (сохранены в БД):${NC}"
+echo -e "Панель:    ${YELLOW}https://$URL_HOST$WEB_BASE_PATH/${NC}"
+echo -e "Подписки:  ${YELLOW}https://$URL_HOST$SUB_PATH/${NC}"
 echo -e ""
 echo -e "${RED}ВАЖНО! НАСТРОЙКА FALLBACK В 3X-UI:${NC}"
 echo -e "1. Создайте Inbound VLESS Reality на порту 443."
