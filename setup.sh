@@ -9,15 +9,16 @@ NC='\033[0m'
 echo -e "${YELLOW}=== Установка (XHTTP + Reality + Nginx) ===${NC}"
 
 # 1. Ввод данных
-read -p "Введите домен: " DOMAIN
+read -p "Введите ваш домен: " DOMAIN
 read -p "Email для Let's Encrypt (Enter - пропустить): " EMAIL
-read -p "Логин для панели: " PANEL_USER
-read -s -p "Пароль для панели: " PANEL_PASS
+read -p "Придумайте логин для панели: " PANEL_USER
+read -s -p "Придумайте пароль для панели: " PANEL_PASS
 echo ""
 
 if [ -z "$DOMAIN" ]; then echo -e "${RED}Домен обязателен!${NC}"; exit 1; fi
 
 # 2. Зависимости
+export DEBIAN_FRONTEND=noninteractive
 apt update && apt install -y nginx certbot curl wget sqlite3 ufw openssl
 
 # 3. UFW
@@ -50,33 +51,48 @@ if [ ! -f "$CERT_PATH" ]; then
     CERT_PATH="/etc/ssl/self-signed/fullchain.pem"; KEY_PATH="/etc/ssl/self-signed/privkey.pem"
 fi
 
-# 6. Установка 3x-ui
+# 6. Установка 3x-ui (Автоматические ответы)
+echo -e "${YELLOW}Установка 3x-ui (авто-режим)...${NC}"
 RAND_PANEL_STR="secret-$(head /dev/urandom | tr -dc a-z0-9 | head -c 8)"
 RAND_SUB_STR="sub-$(head /dev/urandom | tr -dc a-z0-9 | head -c 8)"
 
-bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
-sleep 5
-x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
+# Скачиваем установщик во временный файл, чтобы printf точно сработал
+wget -qO /tmp/xui-install.sh https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh
+
+# Ответы:
+# 1 - SQLite
+# y - Кастомизировать порт
+# 55000 - Порт панели
+# 4 - Без SSL (Nginx сделает)
+# y - Привязать к 127.0.0.1
+printf "1\ny\n55000\n4\ny\n" | bash /tmp/xui-install.sh
+
+sleep 3
 systemctl stop x-ui
 
-# 7. ЖЕСТКАЯ НАСТРОЙКА БАЗЫ
-echo -e "${YELLOW}Настройка базы данных...${NC}"
+# 7. ЖЕСТКАЯ ПЕРЕЗАПИСЬ БАЗЫ (Игнорируем то, что сделал установщик)
+echo -e "${YELLOW}Принудительная настройка базы данных...${NC}"
 sqlite3 /etc/x-ui/x-ui.db <<SQL
+INSERT OR REPLACE INTO settings (key, value) VALUES ('webPort', '55000');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('webBasePath', '/$RAND_PANEL_STR/');
+INSERT OR REPLACE INTO settings (key, value) VALUES ('webListen', '127.0.0.1');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subPath', '/$RAND_SUB_STR/');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subDomain', '$DOMAIN');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subPort', '56000');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subEnable', 'true');
-INSERT OR REPLACE INTO settings (key, value) VALUES ('webListen', '127.0.0.1');
-INSERT OR REPLACE INTO settings (key, value) VALUES ('webPort', '55000');
 SQL
 
-# 8. Создание инбаунда (Исправлен парсинг ключей)
+# Меняем логин/пароль (установщик мог поставить свои)
+x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
+
+# 8. Создание инбаунда XHTTP+Reality
+echo -e "${YELLOW}Создание инбаунда...${NC}"
 XRAY_BIN=$(find /usr/local/x-ui/bin/ -name "xray*" -type f | head -n 1)
 UUID=$(cat /proc/sys/kernel/random/uuid)
 KEYS=$($XRAY_BIN x25519)
-PRIV_KEY=$(echo "$KEYS" | grep -i "Private" | awk '{print $2}')
-PUB_KEY=$(echo "$KEYS" | grep -i "Password" | awk '{print $3}')
+# Безопасный парсинг ключей (берем последнее слово)
+PRIV_KEY=$(echo "$KEYS" | grep -i "PrivateKey" | awk '{print $NF}')
+PUB_KEY=$(echo "$KEYS" | grep -i "Password" | awk '{print $NF}')
 SHORT_ID=$(head /dev/urandom | tr -dc a-f0-9 | head -c 8)
 
 SETTINGS_JSON="{\"clients\":[{\"id\":\"$UUID\",\"flow\":\"\",\"email\":\"default@$DOMAIN\",\"limitIp\":0,\"totalGB\":0,\"expiryTime\":0,\"enable\":true,\"subId\":\"default-sub\"}],\"decryption\":\"none\",\"fallbacks\":[]}"
@@ -84,7 +100,8 @@ STREAM_JSON="{\"network\":\"xhttp\",\"security\":\"reality\",\"xhttpSettings\":{
 
 sqlite3 /etc/x-ui/x-ui.db "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (1, 0, 0, 0, 'XHTTP-Reality', 1, 0, '', 443, 'vless', '$SETTINGS_JSON', '$STREAM_JSON', 'inbound-443', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}');"
 
-# 9. Nginx Fallback
+# 9. Nginx Fallback (порт 50000)
+echo -e "${YELLOW}Настройка Nginx...${NC}"
 cat > /etc/nginx/sites-available/decoy <<EOF
 server {
     listen 80; server_name $DOMAIN;
@@ -103,11 +120,23 @@ server {
 EOF
 
 nginx -t && systemctl reload nginx
-systemctl start x-ui
+systemctl restart x-ui
 
-echo -e "${GREEN}=== ГОТОВО ===${NC}"
+# 10. Итог
+echo -e "${GREEN}========================================${NC}"
+echo -e "${GREEN}=== УСТАНОВКА УСПЕШНО ЗАВЕРШЕНА ===${NC}"
+echo -e "${GREEN}========================================${NC}"
 echo "Панель: https://$DOMAIN/$RAND_PANEL_STR/"
 echo "Подписка: https://$DOMAIN/$RAND_SUB_STR/"
-echo "UUID: $UUID"
-echo "Public Key: $PUB_KEY"
-echo "SNI: $DOMAIN"
+echo "Логин: $PANEL_USER"
+echo "Пароль: $PANEL_PASS"
+echo "----------------------------------------"
+echo "Данные для клиента (VLESS):"
+echo "  Адрес: $DOMAIN"
+echo "  Порт: 443"
+echo "  UUID: $UUID"
+echo "  Public Key: $PUB_KEY"
+echo "  Short ID: $SHORT_ID"
+echo "  SNI: $DOMAIN"
+echo "  Транспорт: XHTTP (stream-one)"
+echo -e "${GREEN}========================================${NC}"
