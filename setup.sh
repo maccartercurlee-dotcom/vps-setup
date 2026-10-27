@@ -53,44 +53,30 @@ fi
 
 # 6. Установка 3x-ui (Автоматические ответы)
 echo -e "${YELLOW}Установка 3x-ui (авто-режим)...${NC}"
-RAND_PANEL_STR="secret-$(head /dev/urandom | tr -dc a-z0-9 | head -c 8)"
-RAND_SUB_STR="sub-$(head /dev/urandom | tr -dc a-z0-9 | head -c 8)"
-
-# Скачиваем установщик во временный файл, чтобы printf точно сработал
 wget -qO /tmp/xui-install.sh https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh
+printf "1\nn\n4\ny\n" | bash /tmp/xui-install.sh
 
-# Ответы:
-# 1 - SQLite
-# y - Кастомизировать порт
-# 55000 - Порт панели
-# 4 - Без SSL (Nginx сделает)
-# y - Привязать к 127.0.0.1
-printf "1\ny\n55000\n4\ny\n" | bash /tmp/xui-install.sh
-
-sleep 3
+sleep 5
 systemctl stop x-ui
 
-# 7. ЖЕСТКАЯ ПЕРЕЗАПИСЬ БАЗЫ (Игнорируем то, что сделал установщик)
+# 7. ЖЕСТКАЯ ПЕРЕЗАПИСЬ БАЗЫ (порты и локальный адрес)
 echo -e "${YELLOW}Принудительная настройка базы данных...${NC}"
+x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
+
 sqlite3 /etc/x-ui/x-ui.db <<SQL
 INSERT OR REPLACE INTO settings (key, value) VALUES ('webPort', '55000');
-INSERT OR REPLACE INTO settings (key, value) VALUES ('webBasePath', '/$RAND_PANEL_STR/');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('webListen', '127.0.0.1');
-INSERT OR REPLACE INTO settings (key, value) VALUES ('subPath', '/$RAND_SUB_STR/');
-INSERT OR REPLACE INTO settings (key, value) VALUES ('subDomain', '$DOMAIN');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subPort', '56000');
+INSERT OR REPLACE INTO settings (key, value) VALUES ('subListen', '127.0.0.1');
+INSERT OR REPLACE INTO settings (key, value) VALUES ('subDomain', '$DOMAIN');
 INSERT OR REPLACE INTO settings (key, value) VALUES ('subEnable', 'true');
 SQL
-
-# Меняем логин/пароль (установщик мог поставить свои)
-x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
 
 # 8. Создание инбаунда XHTTP+Reality
 echo -e "${YELLOW}Создание инбаунда...${NC}"
 XRAY_BIN=$(find /usr/local/x-ui/bin/ -name "xray*" -type f | head -n 1)
 UUID=$(cat /proc/sys/kernel/random/uuid)
 KEYS=$($XRAY_BIN x25519)
-# Безопасный парсинг ключей (берем последнее слово)
 PRIV_KEY=$(echo "$KEYS" | grep -i "PrivateKey" | awk '{print $NF}')
 PUB_KEY=$(echo "$KEYS" | grep -i "Password" | awk '{print $NF}')
 SHORT_ID=$(head /dev/urandom | tr -dc a-f0-9 | head -c 8)
@@ -100,7 +86,10 @@ STREAM_JSON="{\"network\":\"xhttp\",\"security\":\"reality\",\"xhttpSettings\":{
 
 sqlite3 /etc/x-ui/x-ui.db "INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing) VALUES (1, 0, 0, 0, 'XHTTP-Reality', 1, 0, '', 443, 'vless', '$SETTINGS_JSON', '$STREAM_JSON', 'inbound-443', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}');"
 
-# 9. Nginx Fallback (порт 50000)
+# 9. ВЫТАСКИВАЕМ РЕАЛЬНЫЕ ПУТИ ИЗ БАЗЫ (которые создал установщик) И СТРОИМ NGINX
+REAL_WEB_PATH=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='webBasePath';")
+REAL_SUB_PATH=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='subPath';")
+
 echo -e "${YELLOW}Настройка Nginx...${NC}"
 cat > /etc/nginx/sites-available/decoy <<EOF
 server {
@@ -114,8 +103,8 @@ server {
     ssl_certificate $CERT_PATH; ssl_certificate_key $KEY_PATH;
     set_real_ip_from 127.0.0.1; real_ip_header proxy_protocol;
     location / { root /var/www/decoy; index index.html; }
-    location /$RAND_PANEL_STR/ { proxy_pass http://127.0.0.1:55000; proxy_http_version 1.1; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host \$host; }
-    location /$RAND_SUB_STR/ { proxy_pass http://127.0.0.1:56000; proxy_set_header Host \$host; }
+    location $REAL_WEB_PATH { proxy_pass http://127.0.0.1:55000; proxy_http_version 1.1; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host \$host; }
+    location $REAL_SUB_PATH { proxy_pass http://127.0.0.1:56000; proxy_set_header Host \$host; }
 }
 EOF
 
@@ -126,8 +115,8 @@ systemctl restart x-ui
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}=== УСТАНОВКА УСПЕШНО ЗАВЕРШЕНА ===${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo "Панель: https://$DOMAIN/$RAND_PANEL_STR/"
-echo "Подписка: https://$DOMAIN/$RAND_SUB_STR/"
+echo "Панель: https://$DOMAIN$REAL_WEB_PATH"
+echo "Подписка: https://$DOMAIN$REAL_SUB_PATH"
 echo "Логин: $PANEL_USER"
 echo "Пароль: $PANEL_PASS"
 echo "----------------------------------------"
