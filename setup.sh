@@ -1,37 +1,33 @@
 #!/bin/bash
-set -e  # Остановить выполнение при любой ошибке
+set -e
 
-# --- Цвета для вывода ---
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== Начинаю установку и настройку сервера ===${NC}"
+echo -e "${YELLOW}=== Начинаю установку (Архитектура: Nginx за Fallback) ===${NC}"
 
-# --- 1. Запрос данных у пользователя ---
-read -p "Введите ваш домен (или оставьте пустым для использования IP): " DOMAIN
+# 1. Ввод данных
+read -p "Введите ваш домен (или оставьте пустым для IP): " DOMAIN
 read -p "Придумайте логин для панели 3x-ui: " PANEL_USER
 read -s -p "Придумайте пароль для панели 3x-ui: " PANEL_PASS
-echo "" # перенос строки после скрытого ввода
+echo ""
 
-# --- 2. Обновление системы и установка зависимостей ---
-echo -e "${YELLOW}[1/6] Обновление пакетов и установка Nginx, Certbot...${NC}"
+# 2. Зависимости
+echo -e "${YELLOW}[1/6] Установка Nginx, Certbot, UFW...${NC}"
 apt update && apt upgrade -y
 apt install -y nginx certbot python3-certbot-nginx curl wget sqlite3 ufw
 
-# --- 3. Настройка UFW (базовая защита) ---
-echo -e "${YELLOW}[2/6] Настройка файрвола...${NC}"
-ufw allow 22/tcp    # SSH
-ufw allow 80/tcp    # HTTP (Certbot + заглушка)
-ufw allow 443/tcp   # HTTPS (для 3x-ui VLESS Reality)
-# Порты 50000, 55000, 56000 НЕ открываем — они слушают только localhost
+# 3. Файрвол (ТОЛЬКО 22, 80, 443)
+echo -e "${YELLOW}[2/6] Настройка UFW...${NC}"
+ufw allow 22/tcp
+ufw allow 80/tcp
+ufw allow 443/tcp
 ufw --force enable
 
-# --- 4. Создание сайта-заглушки и настройка Nginx ---
-echo -e "${YELLOW}[3/6] Создание сайта-заглушки и конфигурации Nginx...${NC}"
-
-# Создаём папку для заглушки
+# 4. Сайт-заглушка
+echo -e "${YELLOW}[3/6] Создание заглушки...${NC}"
 mkdir -p /var/www/decoy
 cat > /var/www/decoy/index.html <<'EOF'
 <!DOCTYPE html>
@@ -39,73 +35,46 @@ cat > /var/www/decoy/index.html <<'EOF'
 <head>
     <meta charset="UTF-8">
     <title>Добро пожаловать</title>
-    <style>
-        body { font-family: sans-serif; text-align: center; margin-top: 20vh; background: #f4f4f4; }
-        h1 { color: #333; }
-        p { color: #666; }
-    </style>
 </head>
-<body>
+<body style="text-align:center; margin-top:20vh; font-family:sans-serif;">
     <h1>Сайт успешно работает</h1>
     <p>Этот домен настроен и готов к использованию.</p>
 </body>
 </html>
 EOF
 
-# Определяем, использовать ли домен или IP
 if [ -z "$DOMAIN" ]; then
-    echo -e "${YELLOW}Домен не указан. Будет использован IP-адрес сервера.${NC}"
-    SERVER_NAME="_"  # wildcard для Nginx, чтобы принимал запросы по IP
+    SERVER_NAME="_"
     USE_DOMAIN=false
 else
     SERVER_NAME="$DOMAIN"
     USE_DOMAIN=true
 fi
 
-# Временный конфиг Nginx ТОЛЬКО для проверки Certbot (порт 80)
+# Временный конфиг Nginx только для Certbot (порт 80)
 cat > /etc/nginx/sites-available/decoy <<EOF
 server {
     listen 80;
     listen [::]:80;
     server_name $SERVER_NAME;
-
-    root /var/www/decoy;
-    index index.html;
-
-    # Папка для проверки Certbot
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { root /var/www/decoy; index index.html; }
 }
 EOF
-
-# Активируем конфиг и перезагружаем Nginx
 ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
 rm -f /etc/nginx/sites-enabled/default
-nginx -t
-systemctl reload nginx
+nginx -t && systemctl reload nginx
 
-# --- 5. Выпуск сертификата (Let's Encrypt или самоподписанный) ---
-echo -e "${YELLOW}[4/6] Выпуск SSL-сертификата...${NC}"
-
+# 5. Выпуск сертификата
+echo -e "${YELLOW}[4/6] Выпуск SSL...${NC}"
 CERT_PATH=""
 KEY_PATH=""
 
 if [ "$USE_DOMAIN" = true ]; then
-    echo "Запрашиваю сертификат Let's Encrypt для домена: $DOMAIN"
-    # Certbot в режиме --nginx сам настроит редирект, но мы сделаем это позже вручную
     certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --no-eff-email || {
-        echo -e "${RED}Не удалось получить сертификат Let's Encrypt. Проверьте DNS-запись домена.${NC}"
-        echo -e "${YELLOW}Создаю самоподписанный сертификат как запасной вариант...${NC}"
+        echo -e "${RED}Ошибка Let's Encrypt, делаю самоподписанный...${NC}"
         mkdir -p /etc/ssl/self-signed
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout /etc/ssl/self-signed/privkey.pem \
-            -out /etc/ssl/self-signed/fullchain.pem \
-            -subj "/CN=$SERVER_NAME"
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/self-signed/privkey.pem -out /etc/ssl/self-signed/fullchain.pem -subj "/CN=$SERVER_NAME"
         CERT_PATH="/etc/ssl/self-signed/fullchain.pem"
         KEY_PATH="/etc/ssl/self-signed/privkey.pem"
     }
@@ -114,43 +83,26 @@ if [ "$USE_DOMAIN" = true ]; then
         KEY_PATH="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
     fi
 else
-    echo -e "${YELLOW}Домен не указан. Создаю самоподписанный сертификат для IP...${NC}"
     IP=$(curl -s ifconfig.me)
     mkdir -p /etc/ssl/self-signed
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-        -keyout /etc/ssl/self-signed/privkey.pem \
-        -out /etc/ssl/self-signed/fullchain.pem \
-        -subj "/CN=$IP"
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/self-signed/privkey.pem -out /etc/ssl/self-signed/fullchain.pem -subj "/CN=$IP"
     CERT_PATH="/etc/ssl/self-signed/fullchain.pem"
     KEY_PATH="/etc/ssl/self-signed/privkey.pem"
 fi
 
-# --- 6. Обновление конфига Nginx: заглушка + прокси для 3x-ui ---
-echo -e "${YELLOW}[5/6] Настройка обратного прокси для 3x-ui и заглушки...${NC}"
-
-# Перезаписываем конфиг Nginx
+# 6. Финальный конфиг Nginx (порт 50000 для Fallback)
+echo -e "${YELLOW}[5/6] Настройка путей Nginx...${NC}"
 cat > /etc/nginx/sites-available/decoy <<EOF
-# HTTP -> HTTPS редирект (только если есть домен и валидный сертификат)
+# HTTP -> HTTPS редирект
 server {
     listen 80;
     listen [::]:80;
     server_name $SERVER_NAME;
-
-    # Оставляем доступ к ACME для обновления сертификатов
-    location /.well-known/acme-challenge/ {
-        root /var/www/certbot;
-    }
-
-    # Редирект на HTTPS (если сертификат Let's Encrypt)
-    # Если сертификат самоподписанный — можно закомментировать, чтобы не было предупреждений
-    # return 301 https://\$host\$request_uri;
-    location / {
-        root /var/www/decoy;
-        index index.html;
-    }
+    location /.well-known/acme-challenge/ { root /var/www/certbot; }
+    location / { return 301 https://\$host\$request_uri; }
 }
 
-# HTTPS сервер для сайта-заглушки и проксирования 3x-ui (только localhost:50000)
+# Слушаем 50000 для Fallback от 3x-ui Reality
 server {
     listen 127.0.0.1:50000 ssl http2;
     server_name $SERVER_NAME;
@@ -164,7 +116,7 @@ server {
         index index.html;
     }
 
-    # Прокси для панели 3x-ui (порт 55000)
+    # Прокси для панели (внешний путь /panel/)
     location /panel/ {
         proxy_pass http://127.0.0.1:55000/;
         proxy_set_header Host \$host;
@@ -173,9 +125,9 @@ server {
         proxy_set_header X-Forwarded-Proto \$scheme;
     }
 
-    # Прокси для подписок 3x-ui (порт 56000)
+    # Прокси для подписок (внешний путь /sub/)
     location /sub/ {
-        proxy_pass http://127.0.0.1:56000/;
+        proxy_pass http://127.0.0.1:56000/sub/;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
@@ -183,53 +135,44 @@ server {
     }
 }
 EOF
+nginx -t && systemctl reload nginx
 
-# Проверка и перезагрузка Nginx
-nginx -t
-systemctl reload nginx
-
-# --- 7. Установка 3x-ui с SQLite и нужными портами ---
-echo -e "${YELLOW}[6/6] Установка панели 3x-ui...${NC}"
-
-# Официальный скрипт установки. Передаём переменные окружения для SQLite и портов.
-# Панель будет слушать 127.0.0.1:55000 (XUI_PORT), подписка — 127.0.0.1:56000 (XUI_SUB_PORT).
+# 7. Установка 3x-ui (SQLite, порты 55000/56000)
+echo -e "${YELLOW}[6/6] Установка 3x-ui...${NC}"
 export XUI_DB_TYPE=sqlite
 export XUI_DB_FOLDER=/etc/x-ui
 export XUI_PORT=55000
 export XUI_SUB_PORT=56000
-export XUI_INIT_WEB_BASE_PATH=/panel/   # Чтобы панель была доступна по /panel/
+export XUI_INIT_WEB_BASE_PATH=/panel/
 
 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
 
-# После установки меняем логин и пароль по умолчанию
-# (Установщик создаёт случайные, но мы зададим свои)
-sleep 5  # ждём запуска
-x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || {
-    echo -e "${YELLOW}Не удалось автоматически сменить логин/пароль. Сделайте это вручную после входа.${NC}"
-}
-
-# Перезапускаем 3x-ui, чтобы применились порты (если установщик их не подхватил)
+sleep 5
+x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
 systemctl restart x-ui
 
-# --- Завершение ---
+# 8. Вывод результатов
 IP=$(curl -s ifconfig.me)
+URL_HOST="$IP"
+[ "$USE_DOMAIN" = true ] && URL_HOST="$DOMAIN"
+
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Установка завершена!${NC}"
 echo -e "${GREEN}========================================${NC}"
-echo -e "Панель 3x-ui:"
-echo -e "  Логин: ${YELLOW}$PANEL_USER${NC}"
-echo -e "  Пароль: ${YELLOW}$PANEL_PASS${NC}"
-if [ "$USE_DOMAIN" = true ]; then
-    echo -e "  Доступ через Nginx (локально): ${YELLOW}http://127.0.0.1:50000/panel/${NC}"
-    echo -e "  Внешний доступ (если откроете порт 50000): ${YELLOW}https://$DOMAIN:50000/panel/${NC}"
-else
-    echo -e "  Доступ через Nginx (локально): ${YELLOW}http://127.0.0.1:50000/panel/${NC}"
-    echo -e "  Внешний доступ (если откроете порт 50000): ${YELLOW}https://$IP:50000/panel/${NC}"
-fi
+echo -e "Логин: ${YELLOW}$PANEL_USER${NC}"
+echo -e "Пароль: ${YELLOW}$PANEL_PASS${NC}"
 echo -e ""
-echo -e "${YELLOW}ВАЖНО:${NC}"
-echo -e "1. Порт 443 оставлен свободным для VLESS Reality в 3x-ui."
-echo -e "2. Зайдите в панель 3x-ui и создайте inbound VLESS Reality на порту 443."
-echo -e "3. Для self-steal настройте в inbound 'Fallback' на ваш Nginx (например, 127.0.0.1:50000)."
-echo -e "4. Если вы указали домен, не забудьте направить его A-запись на IP: $IP"
+echo -e "${GREEN}ДОСТУП К ПАНЕЛИ И ПОДПИСКАМ (через Nginx/Fallback):${NC}"
+echo -e "Панель:    ${YELLOW}https://$URL_HOST/panel/${NC}"
+echo -e "Подписки:  ${YELLOW}https://$URL_HOST/sub/${NC}"
+echo -e ""
+echo -e "${RED}ВАЖНО! НАСТРОЙКА FALLBACK В 3X-UI:${NC}"
+echo -e "1. Зайдите в панель (пока напрямую: http://127.0.0.1:55000/panel/ или через SSH-туннель)."
+echo -e "2. Создайте Inbound VLESS Reality на порту 443."
+echo -e "3. В настройках Reality Fallbacks добавьте:"
+echo -e "   Name: nginx"
+echo -e "   Dest: 127.0.0.1:50000"
+echo -e "   Xver: 1"
+echo -e "   Path: /"
+echo -e "4. Теперь весь трафик на 443 идет в Xray, а обычные запросы падают в Nginx на 50000."
 echo -e "${GREEN}========================================${NC}"
