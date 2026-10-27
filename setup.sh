@@ -7,52 +7,50 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== Начинаю установку (с авто-настройкой подписок и SNI) ===${NC}"
+echo -e "${YELLOW}=== Начинаю финальную установку (XHTTP + Reality + Nginx) ===${NC}"
 
 # 1. Ввод данных
-read -p "Введите ваш домен (ОБЯЗАТЕЛЬНО для Reality, или оставьте пустым для IP): " DOMAIN
+read -p "Введите ваш домен (ОБЯЗАТЕЛЬНО для Reality/SSL): " DOMAIN
 read -p "Придумайте логин для панели 3x-ui: " PANEL_USER
 read -s -p "Придумайте пароль для панели 3x-ui: " PANEL_PASS
 echo ""
 
-# 2. Зависимости
-echo -e "${YELLOW}[1/7] Установка Nginx, Certbot, UFW, SQLite...${NC}"
-apt update && apt upgrade -y
-apt install -y nginx certbot python3-certbot-nginx curl wget sqlite3 ufw
+if [ -z "$DOMAIN" ]; then
+    echo -e "${RED}ОШИБКА: Домен обязателен. Без домена Reality и Let's Encrypt не будут работать корректно.${NC}"
+    exit 1
+fi
 
-# 3. Файрвол
+# 2. Обновление и установка зависимостей
+echo -e "${YELLOW}[1/7] Установка пакетов (Nginx, Certbot, SQLite, UFW)...${NC}"
+export DEBIAN_FRONTEND=noninteractive
+apt update && apt upgrade -y
+apt install -y nginx certbot python3-certbot-nginx curl wget sqlite3 ufw openssl jq
+
+# 3. Настройка файрвола
 echo -e "${YELLOW}[2/7] Настройка UFW...${NC}"
 ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
 
-# 4. Сайт-заглушка
-echo -e "${YELLOW}[3/7] Создание заглушки...${NC}"
+# 4. Создание сайта-заглушки
+echo -e "${YELLOW}[3/7] Создание сайта-заглушки...${NC}"
 mkdir -p /var/www/decoy
 cat > /var/www/decoy/index.html <<'EOF'
 <!DOCTYPE html>
-<html lang="ru"><head><meta charset="UTF-8"><title>Добро пожаловать</title></head>
+<html lang="ru">
+<head><meta charset="UTF-8"><title>Добро пожаловать</title></head>
 <body style="text-align:center; margin-top:20vh; font-family:sans-serif;">
-<h1>Сайт успешно работает</h1><p>Этот домен настроен и готов к использованию.</p>
-</body></html>
+<h1>Сайт успешно работает</h1>
+<p>Этот домен настроен и готов к использованию.</p>
+</body>
+</html>
 EOF
-
-IP_ADDR=$(curl -s ifconfig.me)
-if [ -z "$DOMAIN" ]; then
-    SERVER_NAME="_"
-    USE_DOMAIN=false
-    URL_HOST="$IP_ADDR"
-else
-    SERVER_NAME="$DOMAIN"
-    USE_DOMAIN=true
-    URL_HOST="$DOMAIN"
-fi
 
 # Временный конфиг Nginx для Certbot
 cat > /etc/nginx/sites-available/decoy <<EOF
 server {
-    listen 80; listen [::]:80; server_name $SERVER_NAME;
+    listen 80; listen [::]:80; server_name $DOMAIN;
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
     location / { root /var/www/decoy; index index.html; }
 }
@@ -61,27 +59,22 @@ ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
-# 5. Сертификат
-echo -e "${YELLOW}[4/7] Выпуск SSL...${NC}"
+# 5. Выпуск сертификата Let's Encrypt
+echo -e "${YELLOW}[4/7] Выпуск SSL сертификата...${NC}"
 CERT_PATH=""; KEY_PATH=""
-if [ "$USE_DOMAIN" = true ]; then
-    certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --no-eff-email || {
-        echo -e "${RED}Ошибка Let's Encrypt, делаю самоподписанный...${NC}"
-        mkdir -p /etc/ssl/self-signed
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/self-signed/privkey.pem -out /etc/ssl/self-signed/fullchain.pem -subj "/CN=$SERVER_NAME"
-        CERT_PATH="/etc/ssl/self-signed/fullchain.pem"; KEY_PATH="/etc/ssl/self-signed/privkey.pem"
-    }
-    if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
-        CERT_PATH="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"; KEY_PATH="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
-    fi
-else
+certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --no-eff-email || {
+    echo -e "${RED}Ошибка Let's Encrypt, делаю самоподписанный...${NC}"
     mkdir -p /etc/ssl/self-signed
-    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/self-signed/privkey.pem -out /etc/ssl/self-signed/fullchain.pem -subj "/CN=$URL_HOST"
+    openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/self-signed/privkey.pem -out /etc/ssl/self-signed/fullchain.pem -subj "/CN=$DOMAIN"
+}
+if [ -f "/etc/letsencrypt/live/$DOMAIN/fullchain.pem" ]; then
+    CERT_PATH="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"; KEY_PATH="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
+else
     CERT_PATH="/etc/ssl/self-signed/fullchain.pem"; KEY_PATH="/etc/ssl/self-signed/privkey.pem"
 fi
 
-# 6. Генерация путей и установка 3x-ui
-echo -e "${YELLOW}[5/7] Установка 3x-ui и генерация путей...${NC}"
+# 6. Установка 3x-ui (SQLite)
+echo -e "${YELLOW}[5/7] Установка 3x-ui...${NC}"
 RAND_PANEL_STR=$(head /dev/urandom | tr -dc a-z0-9 | head -c 12)
 RAND_SUB_STR=$(head /dev/urandom | tr -dc a-z0-9 | head -c 12)
 
@@ -93,53 +86,104 @@ export XUI_INIT_WEB_BASE_PATH="/$RAND_PANEL_STR/"
 
 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
 
-sleep 5
+sleep 6
 x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
 
-# 7. АВТОМАТИЧЕСКАЯ НАСТРОЙКА ПОДПИСОК В БАЗЕ ДАННЫХ
-echo -e "${YELLOW}[6/7] Автоматическая настройка параметров подписки в БД...${NC}"
+# 7. Настройка путей в БД и генерация инбаунда XHTTP+Reality
+echo -e "${YELLOW}[6/7] Настройка БД и создание XHTTP Reality (stream-one)...${NC}"
 
+# Записываем пути и настройки подписок
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/$RAND_PANEL_STR/' WHERE key='webBasePath';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/$RAND_SUB_STR/' WHERE key='subPath';" 2>/dev/null || true
-sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='$URL_HOST' WHERE key='subDomain';" 2>/dev/null || true
+sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='$DOMAIN' WHERE key='subDomain';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='56000' WHERE key='subPort';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='true' WHERE key='subEnable';" 2>/dev/null || true
 
-get_setting() {
-    local key=$1
-    local default=$2
-    local val=$(sqlite3 /etc/x-ui/x-ui.db "SELECT value FROM settings WHERE key='$key';" 2>/dev/null)
-    if [ -z "$val" ]; then echo "$default"; else echo "$val"; fi
+# Извлекаем пути для Nginx
+WEB_BASE_PATH="/$RAND_PANEL_STR"
+SUB_PATH="/$RAND_SUB_STR"
+
+# Генерация ключей Reality
+UUID=$(cat /proc/sys/kernel/random/uuid)
+KEYS=$(/usr/local/x-ui/bin/xray-linux-amd64 x25519)
+PRIV_KEY=$(echo "$KEYS" | grep "Private key:" | awk '{print $3}')
+PUB_KEY=$(echo "$KEYS" | grep "Public key:" | awk '{print $3}')
+SHORT_ID=$(head /dev/urandom | tr -dc a-f0-9 | head -c 8)
+
+# JSON конфиг для клиента (XHTTP не поддерживает flow, поэтому flow="")
+SETTINGS_JSON=$(cat <<JSON
+{
+  "clients": [
+    {
+      "id": "$UUID",
+      "flow": "",
+      "email": "default@$DOMAIN",
+      "limitIp": 0,
+      "totalGB": 0,
+      "expiryTime": 0,
+      "enable": true,
+      "tgId": "",
+      "subId": "default-sub"
+    }
+  ],
+  "decryption": "none",
+  "fallbacks": []
 }
+JSON
+)
 
-WEB_BASE_RAW=$(get_setting "webBasePath" "/$RAND_PANEL_STR/")
-SUB_PATH_RAW=$(get_setting "subPath" "/$RAND_SUB_STR/")
+# JSON конфиг транспорта (XHTTP stream-one + Reality)
+STREAM_JSON=$(cat <<JSON
+{
+  "network": "xhttp",
+  "security": "reality",
+  "xhttpSettings": {
+    "path": "/",
+    "mode": "stream-one",
+    "xPaddingBytes": "100-1000"
+  },
+  "realitySettings": {
+    "show": false,
+    "dest": "127.0.0.1:50000",
+    "xver": 1,
+    "serverNames": ["$DOMAIN"],
+    "privateKey": "$PRIV_KEY",
+    "shortIds": ["$SHORT_ID"]
+  }
+}
+JSON
+)
 
-WEB_BASE_PATH=$(echo "$WEB_BASE_RAW" | sed 's|/*$||')
-SUB_PATH=$(echo "$SUB_PATH_RAW" | sed 's|/*$||')
+# Вставляем инбаунд в базу данных
+sqlite3 /etc/x-ui/x-ui.db <<SQL
+INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
+VALUES (1, 0, 0, 0, 'XHTTP-Reality-443', 1, 0, '', 443, 'vless', '$SETTINGS_JSON', '$STREAM_JSON', 'inbound-443', '{"enabled":true,"destOverride":["http","tls"]}');
+SQL
 
-# 8. Финальный конфиг Nginx (С ПОДДЕРЖКОЙ PROXY PROTOCOL)
-echo -e "${YELLOW}[7/7] Настройка Nginx...${NC}"
+# 8. Финальный конфиг Nginx (порт 50000 + proxy_protocol)
+echo -e "${YELLOW}[7/7] Настройка Nginx как Fallback...${NC}"
 cat > /etc/nginx/sites-available/decoy <<EOF
 server {
-    listen 80; listen [::]:80; server_name $SERVER_NAME;
+    listen 80; listen [::]:80; server_name $DOMAIN;
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
     location / { return 301 https://\$host\$request_uri; }
 }
 
 server {
-    # proxy_protocol нужен, так как Xray передает реальный IP клиента (Xver: 1)
+    # proxy_protocol обязателен для Fallback с параметром Xver: 1
     listen 127.0.0.1:50000 ssl http2 proxy_protocol;
-    server_name $SERVER_NAME;
+    server_name $DOMAIN;
 
     ssl_certificate $CERT_PATH;
     ssl_certificate_key $KEY_PATH;
 
+    # Доверяем локальному IP Xray, чтобы Nginx видел реальный IP клиента
     set_real_ip_from 127.0.0.1;
     real_ip_header proxy_protocol;
 
     location / { root /var/www/decoy; index index.html; }
 
+    # Проксирование панели
     location $WEB_BASE_PATH/ {
         proxy_pass http://127.0.0.1:55000;
         proxy_http_version 1.1;
@@ -152,6 +196,7 @@ server {
         proxy_read_timeout 3600s;
     }
 
+    # Проксирование подписок
     location $SUB_PATH/ {
         proxy_pass http://127.0.0.1:56000;
         proxy_set_header Host \$host;
@@ -165,7 +210,7 @@ EOF
 nginx -t && systemctl reload nginx
 systemctl restart x-ui
 
-# 9. КРАСИВЫЙ И ПОНЯТНЫЙ ИТОГ (С SNI)
+# 9. Итог
 echo -e ""
 echo -e "${GREEN}====================================================${NC}"
 echo -e "${GREEN}        УСТАНОВКА УСПЕШНО ЗАВЕРШЕНА!                ${NC}"
@@ -175,28 +220,22 @@ echo -e "${BLUE}ДАННЫЕ ДЛЯ ВХОДА В ПАНЕЛЬ 3X-UI:${NC}"
 echo -e "  Логин:  ${YELLOW}$PANEL_USER${NC}"
 echo -e "  Пароль: ${YELLOW}$PANEL_PASS${NC}"
 echo -e ""
-echo -e "${BLUE}ВАШИ СЕКРЕТНЫЕ АДРЕСА (сохранены в БД):${NC}"
-echo -e "  Панель:    ${YELLOW}https://$URL_HOST$WEB_BASE_PATH/${NC}"
-echo -e "  Подписки:  ${YELLOW}https://$URL_HOST$SUB_PATH/${NC}"
+echo -e "${GREEN}ССЫЛКИ ДОСТУПА (РАБОТАЮТ СРАЗУ):${NC}"
+echo -e "  Панель:    ${YELLOW}https://$DOMAIN$WEB_BASE_PATH/${NC}"
+echo -e "  Подписки:  ${YELLOW}https://$DOMAIN$SUB_PATH/${NC}"
 echo -e ""
-echo -e "${RED}ВНИМАНИЕ! КАК ЗАЙТИ В ПАНЕЛЬ В ПЕРВЫЙ РАЗ:${NC}"
-echo -e "Так как Reality на 443 порту еще не настроен, ссылка выше пока не работает."
-echo -e "Воспользуйтесь SSH-туннелем. На ВАШЕМ ПК выполните:"
-echo -e "${YELLOW}ssh -L 50000:127.0.0.1:50000 root@$IP_ADDR${NC}"
-echo -e "И откройте в браузере на ПК:"
-echo -e "${YELLOW}https://127.0.0.1:50000$WEB_BASE_PATH/${NC}"
-echo -e "(Согласитесь с предупреждением сертификата)."
-echo -e ""
-echo -e "${RED}====================================================${NC}"
-echo -e "${RED}   КРИТИЧЕСКИ ВАЖНО! НАСТРОЙКА REALITY (SNI)        ${NC}"
-echo -e "${RED}====================================================${NC}"
-echo -e "В панели 3x-ui при создании Inbound (VLESS) на порту 443,"
-echo -e "в разделе Security -> Reality укажите СЛЕДУЮЩИЕ ПАРАМЕТРЫ:"
-echo -e ""
-echo -e "  1. Dest (Target):       ${YELLOW}127.0.0.1:50000${NC}"
-echo -e "  2. SNI (Server Names):  ${YELLOW}$URL_HOST${NC}  <--- ОЧЕНЬ ВАЖНО!"
-echo -e "  3. Xver (Proxy Protocol): ${YELLOW}1${NC}"
-echo -e ""
-echo -e "Если вы не укажете SNI = $URL_HOST, сайт-заглушка и панель"
-echo -e "не откроются при попытке зайти на сервер через браузер."
+echo -e "${RED}ДАННЫЕ ДЛЯ КЛИЕНТА (v2rayNG / Happ и др.):${NC}"
+echo -e "  Протокол:  VLESS"
+echo -e "  Адрес:     $DOMAIN"
+echo -e "  Порт:      443"
+echo -e "  UUID:      $UUID"
+echo -e "  Flow:      (оставить пустым!)"
+echo -e "  Security:  Reality"
+echo -e "  SNI:       $DOMAIN"
+echo -e "  Public Key:$PUB_KEY"
+echo -e "  Short ID:  $SHORT_ID"
+echo -e "  Fingerprint: chrome"
+echo -e "  Транспорт: XHTTP"
+echo -e "  Path:      /"
+echo -e "  Mode:      stream-one"
 echo -e "${GREEN}====================================================${NC}"
