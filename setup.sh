@@ -7,7 +7,7 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== Начинаю финальную установку (XHTTP + Reality + Nginx) ===${NC}"
+echo -e "${YELLOW}=== Начинаю установку (XHTTP + Reality + Nginx) ===${NC}"
 
 # 1. Ввод данных
 read -p "Введите ваш домен (ОБЯЗАТЕЛЬНО для Reality/SSL): " DOMAIN
@@ -16,7 +16,7 @@ read -s -p "Придумайте пароль для панели 3x-ui: " PANEL
 echo ""
 
 if [ -z "$DOMAIN" ]; then
-    echo -e "${RED}ОШИБКА: Домен обязателен. Без домена Reality и Let's Encrypt не будут работать корректно.${NC}"
+    echo -e "${RED}ОШИБКА: Домен обязателен.${NC}"
     exit 1
 fi
 
@@ -24,7 +24,7 @@ fi
 echo -e "${YELLOW}[1/7] Установка пакетов (Nginx, Certbot, SQLite, UFW)...${NC}"
 export DEBIAN_FRONTEND=noninteractive
 apt update && apt upgrade -y
-apt install -y nginx certbot python3-certbot-nginx curl wget sqlite3 ufw openssl jq
+apt install -y nginx certbot curl wget sqlite3 ufw openssl
 
 # 3. Настройка файрвола
 echo -e "${YELLOW}[2/7] Настройка UFW...${NC}"
@@ -33,9 +33,10 @@ ufw allow 80/tcp
 ufw allow 443/tcp
 ufw --force enable
 
-# 4. Создание сайта-заглушки
-echo -e "${YELLOW}[3/7] Создание сайта-заглушки...${NC}"
+# 4. Сайт-заглушка и директория для Certbot
+echo -e "${YELLOW}[3/7] Создание заглушки и папки для Certbot...${NC}"
 mkdir -p /var/www/decoy
+mkdir -p /var/www/certbot
 cat > /var/www/decoy/index.html <<'EOF'
 <!DOCTYPE html>
 <html lang="ru">
@@ -47,7 +48,7 @@ cat > /var/www/decoy/index.html <<'EOF'
 </html>
 EOF
 
-# Временный конфиг Nginx для Certbot
+# Временный конфиг Nginx (используем webroot для Certbot)
 cat > /etc/nginx/sites-available/decoy <<EOF
 server {
     listen 80; listen [::]:80; server_name $DOMAIN;
@@ -59,10 +60,10 @@ ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
-# 5. Выпуск сертификата Let's Encrypt
+# 5. Выпуск сертификата Let's Encrypt (без email, через webroot)
 echo -e "${YELLOW}[4/7] Выпуск SSL сертификата...${NC}"
 CERT_PATH=""; KEY_PATH=""
-certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --no-eff-email || {
+certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || {
     echo -e "${RED}Ошибка Let's Encrypt, делаю самоподписанный...${NC}"
     mkdir -p /etc/ssl/self-signed
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/self-signed/privkey.pem -out /etc/ssl/self-signed/fullchain.pem -subj "/CN=$DOMAIN"
@@ -87,10 +88,10 @@ export XUI_INIT_WEB_BASE_PATH="/$RAND_PANEL_STR/"
 bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh)
 
 sleep 6
-x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS" || true
 
-# 7. Настройка путей в БД и генерация инбаунда XHTTP+Reality
+# 7. ОСТАНОВКА СЕРВИСА ПЕРЕД МОДИФИКАЦИЕЙ БД (Ваш пункт №1)
 echo -e "${YELLOW}[6/7] Настройка БД и создание XHTTP Reality (stream-one)...${NC}"
+systemctl stop x-ui
 
 # Записываем пути и настройки подписок
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/$RAND_PANEL_STR/' WHERE key='webBasePath';" 2>/dev/null || true
@@ -99,18 +100,21 @@ sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='$DOMAIN' WHERE key='subDom
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='56000' WHERE key='subPort';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='true' WHERE key='subEnable';" 2>/dev/null || true
 
-# Извлекаем пути для Nginx
-WEB_BASE_PATH="/$RAND_PANEL_STR"
-SUB_PATH="/$RAND_SUB_STR"
+# Динамический поиск бинарника Xray (Ваш пункт №2)
+XRAY_BIN=$(find /usr/local/x-ui/bin/ -name "xray*" -type f | head -n 1)
+if [ -z "$XRAY_BIN" ]; then
+    echo -e "${RED}Не удалось найти бинарник Xray!${NC}"
+    exit 1
+fi
 
 # Генерация ключей Reality
 UUID=$(cat /proc/sys/kernel/random/uuid)
-KEYS=$(/usr/local/x-ui/bin/xray-linux-amd64 x25519)
+KEYS=$($XRAY_BIN x25519)
 PRIV_KEY=$(echo "$KEYS" | grep "Private key:" | awk '{print $3}')
 PUB_KEY=$(echo "$KEYS" | grep "Public key:" | awk '{print $3}')
 SHORT_ID=$(head /dev/urandom | tr -dc a-f0-9 | head -c 8)
 
-# JSON конфиг для клиента (XHTTP не поддерживает flow, поэтому flow="")
+# JSON конфиг для клиента
 SETTINGS_JSON=$(cat <<JSON
 {
   "clients": [
@@ -160,6 +164,9 @@ INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, lis
 VALUES (1, 0, 0, 0, 'XHTTP-Reality-443', 1, 0, '', 443, 'vless', '$SETTINGS_JSON', '$STREAM_JSON', 'inbound-443', '{"enabled":true,"destOverride":["http","tls"]}');
 SQL
 
+# Включаем сервис обратно
+systemctl start x-ui
+
 # 8. Финальный конфиг Nginx (порт 50000 + proxy_protocol)
 echo -e "${YELLOW}[7/7] Настройка Nginx как Fallback...${NC}"
 cat > /etc/nginx/sites-available/decoy <<EOF
@@ -170,21 +177,18 @@ server {
 }
 
 server {
-    # proxy_protocol обязателен для Fallback с параметром Xver: 1
     listen 127.0.0.1:50000 ssl http2 proxy_protocol;
     server_name $DOMAIN;
 
     ssl_certificate $CERT_PATH;
     ssl_certificate_key $KEY_PATH;
 
-    # Доверяем локальному IP Xray, чтобы Nginx видел реальный IP клиента
     set_real_ip_from 127.0.0.1;
     real_ip_header proxy_protocol;
 
     location / { root /var/www/decoy; index index.html; }
 
-    # Проксирование панели
-    location $WEB_BASE_PATH/ {
+    location /$RAND_PANEL_STR/ {
         proxy_pass http://127.0.0.1:55000;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
@@ -196,8 +200,7 @@ server {
         proxy_read_timeout 3600s;
     }
 
-    # Проксирование подписок
-    location $SUB_PATH/ {
+    location /$RAND_SUB_STR/ {
         proxy_pass http://127.0.0.1:56000;
         proxy_set_header Host \$host;
         proxy_set_header X-Real-IP \$remote_addr;
@@ -221,8 +224,8 @@ echo -e "  Логин:  ${YELLOW}$PANEL_USER${NC}"
 echo -e "  Пароль: ${YELLOW}$PANEL_PASS${NC}"
 echo -e ""
 echo -e "${GREEN}ССЫЛКИ ДОСТУПА (РАБОТАЮТ СРАЗУ):${NC}"
-echo -e "  Панель:    ${YELLOW}https://$DOMAIN$WEB_BASE_PATH/${NC}"
-echo -e "  Подписки:  ${YELLOW}https://$DOMAIN$SUB_PATH/${NC}"
+echo -e "  Панель:    ${YELLOW}https://$DOMAIN/$RAND_PANEL_STR/${NC}"
+echo -e "  Подписки:  ${YELLOW}https://$DOMAIN/$RAND_SUB_STR/${NC}"
 echo -e ""
 echo -e "${RED}ДАННЫЕ ДЛЯ КЛИЕНТА (v2rayNG / Happ и др.):${NC}"
 echo -e "  Протокол:  VLESS"
