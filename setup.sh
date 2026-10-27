@@ -11,6 +11,7 @@ echo -e "${YELLOW}=== Начинаю установку (XHTTP + Reality + Nginx
 
 # 1. Ввод данных
 read -p "Введите ваш домен (ОБЯЗАТЕЛЬНО для Reality/SSL): " DOMAIN
+read -p "Введите ваш email для Let's Encrypt (или оставьте пустым): " EMAIL
 read -p "Придумайте логин для панели 3x-ui: " PANEL_USER
 read -s -p "Придумайте пароль для панели 3x-ui: " PANEL_PASS
 echo ""
@@ -60,10 +61,18 @@ ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
 rm -f /etc/nginx/sites-enabled/default
 nginx -t && systemctl reload nginx
 
-# 5. Выпуск сертификата Let's Encrypt (без email, через webroot)
+# 5. Выпуск сертификата Let's Encrypt
 echo -e "${YELLOW}[4/7] Выпуск SSL сертификата...${NC}"
 CERT_PATH=""; KEY_PATH=""
-certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos --register-unsafely-without-email || {
+
+# Формируем аргумент email для Certbot
+if [ -n "$EMAIL" ]; then
+    EMAIL_ARG="-m $EMAIL"
+else
+    EMAIL_ARG="--register-unsafely-without-email"
+fi
+
+certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos $EMAIL_ARG || {
     echo -e "${RED}Ошибка Let's Encrypt, делаю самоподписанный...${NC}"
     mkdir -p /etc/ssl/self-signed
     openssl req -x509 -nodes -days 365 -newkey rsa:2048 -keyout /etc/ssl/self-signed/privkey.pem -out /etc/ssl/self-signed/fullchain.pem -subj "/CN=$DOMAIN"
@@ -89,18 +98,17 @@ bash <(curl -Ls https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.
 
 sleep 6
 
-# 7. ОСТАНОВКА СЕРВИСА ПЕРЕД МОДИФИКАЦИЕЙ БД (Ваш пункт №1)
+# 7. ОСТАНОВКА СЕРВИСА ПЕРЕД МОДИФИКАЦИЕЙ БД
 echo -e "${YELLOW}[6/7] Настройка БД и создание XHTTP Reality (stream-one)...${NC}"
 systemctl stop x-ui
 
-# Записываем пути и настройки подписок
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/$RAND_PANEL_STR/' WHERE key='webBasePath';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='/$RAND_SUB_STR/' WHERE key='subPath';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='$DOMAIN' WHERE key='subDomain';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='56000' WHERE key='subPort';" 2>/dev/null || true
 sqlite3 /etc/x-ui/x-ui.db "UPDATE settings SET value='true' WHERE key='subEnable';" 2>/dev/null || true
 
-# Динамический поиск бинарника Xray (Ваш пункт №2)
+# Динамический поиск бинарника Xray
 XRAY_BIN=$(find /usr/local/x-ui/bin/ -name "xray*" -type f | head -n 1)
 if [ -z "$XRAY_BIN" ]; then
     echo -e "${RED}Не удалось найти бинарник Xray!${NC}"
@@ -158,13 +166,11 @@ STREAM_JSON=$(cat <<JSON
 JSON
 )
 
-# Вставляем инбаунд в базу данных
 sqlite3 /etc/x-ui/x-ui.db <<SQL
 INSERT INTO inbounds (user_id, up, down, total, remark, enable, expiry_time, listen, port, protocol, settings, stream_settings, tag, sniffing)
 VALUES (1, 0, 0, 0, 'XHTTP-Reality-443', 1, 0, '', 443, 'vless', '$SETTINGS_JSON', '$STREAM_JSON', 'inbound-443', '{"enabled":true,"destOverride":["http","tls"]}');
 SQL
 
-# Включаем сервис обратно
 systemctl start x-ui
 
 # 8. Финальный конфиг Nginx (порт 50000 + proxy_protocol)
