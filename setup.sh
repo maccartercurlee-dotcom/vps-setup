@@ -129,8 +129,8 @@ c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_setti
           (settings_json, stream_json, sniffing_json))
 inbound_id = c.lastrowid
 
-# 3. Fallback (Inbound Fallbacks)
-c.execute("INSERT INTO inbound_fallbacks (master_id, name, dest, xver) VALUES (?, 'nginx', '40000', 0)", (inbound_id,))
+# 3. Fallback (ИСПРАВЛЕНО: добавлен child_id=0)
+c.execute("INSERT INTO inbound_fallbacks (master_id, child_id, name, dest, xver) VALUES (?, 0, 'nginx', '40000', 0)", (inbound_id,))
 
 # 4. Клиент (Clients)
 c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", 
