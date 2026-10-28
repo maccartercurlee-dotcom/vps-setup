@@ -5,7 +5,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== ИДЕАЛЬНАЯ УСТАНОВКА (PYTHON DB INJECTION) ===${NC}"
+echo -e "${YELLOW}=== ИДЕАЛЬНАЯ УСТАНОВКА (ОБХОД БАГА БАЗЫ) ===${NC}"
 
 read -p "Домен (напр. llm.atms2006.ru): " DOMAIN
 read -p "Email (Enter - пропустить): " EMAIL
@@ -62,7 +62,6 @@ systemctl start x-ui
 sleep 3
 systemctl stop x-ui
 
-# Генерируем ключи
 XRAY_BIN=$(find /usr/local/x-ui/bin/ -name "xray*" -type f | head -n 1)
 UUID=$(cat /proc/sys/kernel/random/uuid)
 SUB_ID=$(head /dev/urandom | tr -dc a-f0-9 | head -c 16)
@@ -72,7 +71,6 @@ PUB_KEY=$(echo "$KEYS" | grep -i "Password" | awk '{print $NF}')
 SHORT_ID=$(head /dev/urandom | tr -dc a-f0-9 | head -c 8)
 SPIDER_X="/$(head /dev/urandom | tr -dc a-zA-Z0-9 | head -c 12)"
 
-# ПЕРЕДАЕМ ВСЕ ДАННЫЕ В PYTHON ДЛЯ ВСТАВКИ В БАЗУ
 export DB_DOMAIN="$DOMAIN"
 export DB_PANEL_PORT="$PANEL_PORT"
 export DB_WEB_PATH="$WEB_PATH"
@@ -85,7 +83,7 @@ export DB_PUB_KEY="$PUB_KEY"
 export DB_SHORT_ID="$SHORT_ID"
 export DB_SPIDER_X="$SPIDER_X"
 
-echo -e "${YELLOW}Запись в базу данных через Python...${NC}"
+echo -e "${YELLOW}Запись в базу (Fallback внутри JSON)...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json
 
@@ -93,7 +91,6 @@ db = '/etc/x-ui/x-ui.db'
 conn = sqlite3.connect(db)
 c = conn.cursor()
 
-# 1. Настройки (Settings)
 settings = [
     ('webPort', os.environ['DB_PANEL_PORT']),
     ('webBasePath', os.environ['DB_WEB_PATH']),
@@ -108,8 +105,13 @@ settings = [
 c.execute("DELETE FROM settings WHERE key IN ('webPort', 'webBasePath', 'webListen', 'subPort', 'subPath', 'subListen', 'subEnable', 'subDomain', 'subURI')")
 c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", settings)
 
-# 2. Инбаунд (Inbound)
-settings_json = json.dumps({"clients": [], "decryption": "none"})
+# ВОТ ГЛАВНЫЙ ФИКС: Fallback внутри JSON, игнорируем таблицу inbound_fallbacks
+settings_json = json.dumps({
+    "clients": [], 
+    "decryption": "none",
+    "fallbacks": [{"dest": 40000, "xver": 0}]
+})
+
 stream_json = json.dumps({
     "network": "xhttp",
     "security": "reality",
@@ -129,20 +131,15 @@ c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_setti
           (settings_json, stream_json, sniffing_json))
 inbound_id = c.lastrowid
 
-# 3. Fallback (ИСПРАВЛЕНО: добавлен child_id=0)
-c.execute("INSERT INTO inbound_fallbacks (master_id, child_id, name, dest, xver) VALUES (?, 0, 'nginx', '40000', 0)", (inbound_id,))
-
-# 4. Клиент (Clients)
 c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", 
           (f"default@{os.environ['DB_DOMAIN']}", os.environ['DB_SUB_ID'], os.environ['DB_UUID']))
 client_id = c.lastrowid
 
-# 5. Связка клиента и инбаунда (Client Inbounds)
 c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (client_id, inbound_id))
 
 conn.commit()
 conn.close()
-print("База данных успешно заполнена через Python!")
+print("База данных заполнена (Fallback в JSON)!")
 PYEOF
 
 systemctl start x-ui
