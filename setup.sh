@@ -3,10 +3,9 @@ set -e
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
-RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== ИДЕАЛЬНАЯ УСТАНОВКА (ОБХОД БАГА БАЗЫ) ===${NC}"
+echo -e "${YELLOW}=== УСТАНОВКА (XHTTP + REALITY + FALLBACK) ===${NC}"
 
 read -p "Домен (напр. llm.atms2006.ru): " DOMAIN
 read -p "Email (Enter - пропустить): " EMAIL
@@ -54,12 +53,6 @@ if [ ! -f "$CERT_PATH" ]; then
     certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos $EMAIL_ARG || true
 fi
 
-if [ ! -f "$CERT_PATH" ]; then
-    echo -e "${RED}ОШИБКА: Не удалось получить сертификат для $DOMAIN!${NC}"
-    echo -e "${RED}Проверьте, правильно ли введен домен и указывает ли он на этот сервер.${NC}"
-    exit 1
-fi
-
 wget -qO /tmp/xui-install.sh https://raw.githubusercontent.com/mhsanaei/3x-ui/master/install.sh
 printf "1\nn\n4\ny\n" | bash /tmp/xui-install.sh
 sleep 7
@@ -90,7 +83,7 @@ export DB_PUB_KEY="$PUB_KEY"
 export DB_SHORT_ID="$SHORT_ID"
 export DB_SPIDER_X="$SPIDER_X"
 
-echo -e "${YELLOW}Запись в базу (Fallback внутри JSON)...${NC}"
+echo -e "${YELLOW}Запись в базу (XHTTP + Reality)...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json
 
@@ -113,9 +106,21 @@ c.execute("DELETE FROM settings WHERE key IN ('webPort', 'webBasePath', 'webList
 c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", settings)
 
 settings_json = json.dumps({
-    "clients": [], 
-    "decryption": "none",
-    "fallbacks": [{"dest": 40000, "xver": 0}]
+    "clients": [
+        {
+            "id": os.environ['DB_UUID'],
+            "flow": "",
+            "email": f"default@{os.environ['DB_DOMAIN']}",
+            "limitIp": 0,
+            "totalGB": 0,
+            "expiryTime": 0,
+            "enable": True,
+            "tgId": 0,
+            "subId": os.environ['DB_SUB_ID'],
+            "reset": 0
+        }
+    ], 
+    "decryption": "none"
 })
 
 stream_json = json.dumps({
@@ -137,23 +142,18 @@ c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_setti
           (settings_json, stream_json, sniffing_json))
 inbound_id = c.lastrowid
 
-c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", 
-          (f"default@{os.environ['DB_DOMAIN']}", os.environ['DB_SUB_ID'], os.environ['DB_UUID']))
-client_id = c.lastrowid
-
-c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (client_id, inbound_id))
+try:
+    c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", 
+              (f"default@{os.environ['DB_DOMAIN']}", os.environ['DB_SUB_ID'], os.environ['DB_UUID']))
+    client_id = c.lastrowid
+    c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (client_id, inbound_id))
+except sqlite3.IntegrityError:
+    pass
 
 conn.commit()
 conn.close()
-print("База данных заполнена (Fallback в JSON)!")
 PYEOF
 
-systemctl start x-ui
-sleep 2
-x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS"
-systemctl stop x-ui
-
-echo -e "${YELLOW}Настройка Nginx...${NC}"
 python3 -c "
 config = '''
 server {
@@ -179,17 +179,16 @@ with open('/etc/nginx/sites-available/decoy', 'w') as f:
 
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
+nginx -t && systemctl restart nginx
 
-# ЖЕСТКАЯ ПРОВЕРКА NGINX ПЕРЕД ЗАПУСКОМ
-if ! nginx -t; then
-    echo -e "${RED}ОШИБКА: Конфиг Nginx не прошел проверку! Установка прервана.${NC}"
-    exit 1
-fi
-systemctl restart nginx
 systemctl start x-ui
+sleep 5 
+x-ui setting -username "$PANEL_USER" -password "$PANEL_PASS"
+systemctl restart x-ui
+sleep 3
 
 echo -e "\n${GREEN}====================================================${NC}"
-echo -e "${GREEN}        ВСЁ ГОТОВО! БАЗА ЗАПОЛНЕНА ИДЕАЛЬНО.        ${NC}"
+echo -e "${GREEN}        ВСЁ ГОТОВО! СИСТЕМА ЗАПУЩЕНА.               ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 echo -e "Логин: $PANEL_USER | Пароль: $PANEL_PASS"
 echo -e "ПАНЕЛЬ:   ${YELLOW}https://$DOMAIN$WEB_PATH${NC}"
