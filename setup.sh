@@ -3,9 +3,10 @@ set -e
 
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+RED='\033[0;31m'
 NC='\033[0m'
 
-echo -e "${YELLOW}=== УСТАНОВКА (XHTTP + REALITY + SQL DUMP HONEYPOT) ===${NC}"
+echo -e "${YELLOW}=== УСТАНОВКА (XHTTP + REALITY + NEXUS HONEYPOT) ===${NC}"
 
 read -p "Домен (напр. llm.atms2006.ru): " DOMAIN
 read -p "Email (Enter - пропустить): " EMAIL
@@ -32,98 +33,124 @@ ufw allow 22/tcp; ufw allow 80/tcp; ufw allow 443/tcp; ufw --force enable
 
 mkdir -p /var/www/decoy /var/www/certbot
 
-# --- СОЗДАНИЕ ХАНИПОТА (СЛИТЫЙ SQL ДАМП) ---
+# --- СОЗДАНИЕ ХАНИПОТА (NEXUS AI NODE) ---
 cat > /var/www/decoy/index.html <<'HTMLEOF'
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>db_backup_2026.sql</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Nexus AI Node</title>
     <style>
-        body { background-color: #1e1e1e; color: #d4d4d4; font-family: 'Courier New', Courier, monospace; font-size: 14px; padding: 20px; white-space: pre-wrap; line-height: 1.5; }
-        .sql-header { color: #569cd6; }
-        .sql-table { color: #4ec9b0; }
-        .sql-string { color: #ce9178; }
-        .sql-number { color: #b5cea8; }
-        .sql-comment { color: #6a9955; }
+        body {
+            background-color: #0f172a;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: #ffffff;
+        }
+        .login-box {
+            background-color: #1e293b;
+            padding: 40px;
+            border-radius: 12px;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+            width: 340px;
+            text-align: center;
+            box-sizing: border-box;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            color: #0ea5e9;
+            margin-bottom: 8px;
+        }
+        .subtitle {
+            color: #94a3b8;
+            font-size: 13px;
+            margin-bottom: 30px;
+        }
+        input {
+            width: 100%;
+            padding: 12px 16px;
+            margin-bottom: 16px;
+            background-color: #0f172a;
+            border: 1px solid #334155;
+            border-radius: 6px;
+            color: #ffffff;
+            font-size: 14px;
+            box-sizing: border-box;
+            transition: border-color 0.2s;
+        }
+        input:focus {
+            outline: none;
+            border-color: #0ea5e9;
+        }
+        input::placeholder {
+            color: #64748b;
+        }
+        button {
+            width: 100%;
+            padding: 14px;
+            background-color: #0ea5e9;
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+            margin-top: 8px;
+        }
+        button:hover {
+            background-color: #0284c7;
+        }
+        .footer {
+            margin-top: 24px;
+            font-size: 12px;
+            color: #475569;
+        }
     </style>
 </head>
-<body><span class="sql-comment">-- MySQL dump 10.13  Distrib 8.0.32, for Linux (x86_64)
---
--- Host: localhost    Database: xui_panel
--- ------------------------------------------------------
--- Server version	8.0.32-0ubuntu0.22.04.2
+<body>
+    <div class="login-box">
+        <div class="logo">Nexus AI Node</div>
+        <div class="subtitle">Restricted Access Area</div>
+        <form id="loginForm">
+            <input type="text" placeholder="Email / Node ID" required>
+            <input type="password" placeholder="Access Key" required>
+            <button type="submit" id="submitBtn">Initialize Connection</button>
+        </form>
+        <div class="footer">v 2.4.1 | End-to-End Encrypted</div>
+    </div>
 
-/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;
-/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;
-/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;
-/*!50503 SET NAMES utf8mb4 */;
-/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;
-/*!40103 SET TIME_ZONE='+00:00' */;
-/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;
-/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;
-/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;
-/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;
+    <script>
+        document.getElementById('loginForm').addEventListener('submit', function(e) {
+            e.preventDefault();
+            const btn = document.getElementById('submitBtn');
+            const inputs = document.querySelectorAll('input');
+            
+            btn.innerText = 'Connecting...';
+            btn.style.backgroundColor = '#475569';
+            btn.disabled = true;
+            inputs.forEach(i => i.disabled = true);
 
---
--- Table structure for table <span class="sql-table">`users`</span>
---
-
-DROP TABLE IF EXISTS <span class="sql-table">`users`</span>;
-/*!40101 SET @saved_cs_client     = @@character_set_client */;
-/*!50503 SET character_set_client = utf8mb4 */;
-CREATE TABLE <span class="sql-table">`users`</span> (
-  <span class="sql-table">`id`</span> int NOT NULL AUTO_INCREMENT,
-  <span class="sql-table">`username`</span> varchar(255) NOT NULL,
-  <span class="sql-table">`password`</span> varchar(255) NOT NULL,
-  <span class="sql-table">`email`</span> varchar(255) DEFAULT NULL,
-  <span class="sql-table">`created_at`</span> datetime DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (<span class="sql-table">`id`</span>)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-/*!40101 SET character_set_client = @saved_cs_client */;
-
---
--- Dumping data for table <span class="sql-table">`users`</span>
---
-
-LOCK TABLES <span class="sql-table">`users`</span> WRITE;
-/*!40000 ALTER TABLE <span class="sql-table">`users`</span> DISABLE KEYS */;
-INSERT INTO <span class="sql-table">`users`</span> VALUES (<span class="sql-number">1</span>,<span class="sql-string">'admin'</span>,<span class="sql-string">'$2a$10$X8vP1jK9z7wQ2mR4tY6uO.e5N1c3B7x9A2s4D6f8G0h1J3k5L7m9N'</span>,<span class="sql-string">'admin@localhost'</span>,<span class="sql-string">'2026-01-15 08:30:00'</span>),
-(<span class="sql-number">2</span>,<span class="sql-string">'root'</span>,<span class="sql-string">'$2a$10$Q9wE1rT3y5U7iO9p0A2s4D6f8G0h1J3k5L7m9N1b3V5c7X9z2Q4w6E'</span>,<span class="sql-string">'root@127.0.0.1'</span>,<span class="sql-string">'2026-02-20 14:15:22'</span>),
-(<span class="sql-number">3</span>,<span class="sql-string">'developer'</span>,<span class="sql-string">'$2a$10$Z1x3C5v7B9n1M3k5J7h9G1f3D5s7A9p1O3i5U7y9T1r3E5w7Q9z2X'</span>,<span class="sql-string">'dev@company.com'</span>,<span class="sql-string">'2026-03-10 09:00:11'</span>);
-/*!40000 ALTER TABLE <span class="sql-table">`users`</span> ENABLE KEYS */;
-UNLOCK TABLES;
-
---
--- Table structure for table <span class="sql-table">`inbounds`</span>
---
-
-DROP TABLE IF EXISTS <span class="sql-table">`inbounds`</span>;
-CREATE TABLE <span class="sql-table">`inbounds`</span> (
-  <span class="sql-table">`id`</span> int NOT NULL AUTO_INCREMENT,
-  <span class="sql-table">`user_id`</span> int NOT NULL,
-  <span class="sql-table">`port`</span> int NOT NULL,
-  <span class="sql-table">`protocol`</span> varchar(50) NOT NULL,
-  <span class="sql-table">`settings`</span> json NOT NULL,
-  PRIMARY KEY (<span class="sql-table">`id`</span>)
-) ENGINE=InnoDB AUTO_INCREMENT=2 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
-
-LOCK TABLES <span class="sql-table">`inbounds`</span> WRITE;
-INSERT INTO <span class="sql-table">`inbounds`</span> VALUES (<span class="sql-number">1</span>,<span class="sql-number">1</span>,<span class="sql-number">443</span>,<span class="sql-string">'vless'</span>,<span class="sql-string">'{"clients":[{"id":"550e8400-e29b-41d4-a716-446655440000","flow":"xtls-rprx-vision"}]}'</span>);
-/*!40000 ALTER TABLE <span class="sql-table">`inbounds`</span> ENABLE KEYS */;
-UNLOCK TABLES;
-
-/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
-/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;
-/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;
-/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;
-/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
-/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
-/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
-/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
-
--- Dump completed on 2026-10-28 12:00:00
-</span></body>
+            setTimeout(() => {
+                btn.innerText = 'Access Denied';
+                btn.style.backgroundColor = '#ef4444';
+                
+                setTimeout(() => {
+                    btn.innerText = 'Initialize Connection';
+                    btn.style.backgroundColor = '#0ea5e9';
+                    btn.disabled = false;
+                    inputs.forEach(i => { i.disabled = false; i.value = ''; });
+                }, 2000);
+            }, 1500);
+        });
+    </script>
+</body>
 </html>
 HTMLEOF
 # --- КОНЕЦ ХАНИПОТА ---
@@ -207,7 +234,8 @@ settings_json = json.dumps({
             "reset": 0
         }
     ], 
-    "decryption": "none"
+    "decryption": "none",
+    "fallbacks": [{"dest": 40000, "xver": 0}]
 })
 
 stream_json = json.dumps({
