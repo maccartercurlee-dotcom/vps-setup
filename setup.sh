@@ -8,7 +8,7 @@ NC='\033[0m'
 
 clear
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}           ИДЕАЛЬНЫЙ УСТАНОВЩИК (ПО ТВОИМ JSON)     ${NC}"
+echo -e "${GREEN}     УСТАНОВЩИК (РОВНО 5 КЛИЕНТОВ НА ВСЕ ПРОТОКОЛЫ) ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 
 read -p "Введите домен (напр. llm.atms2006.ru): " RAW_DOMAIN
@@ -77,7 +77,6 @@ EOF
     certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos -m "mrcogahmed@gmail.com" || true
 fi
 
-# Автообновление
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 echo -e '#!/bin/bash\nsystemctl reload nginx' > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
@@ -102,7 +101,7 @@ export DB_CERT_PATH="$CERT_PATH"
 export DB_KEY_PATH="$KEY_PATH"
 export PROTOCOLS="$PROTOCOLS"
 
-echo -e "${YELLOW}Запись конфигурации (по твоим JSON)...${NC}"
+echo -e "${YELLOW}Запись конфигурации (ровно 5 клиентов)...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess
 
@@ -125,7 +124,6 @@ c.execute("DELETE FROM client_inbounds")
 c.execute("DELETE FROM inbounds")
 c.execute("DELETE FROM settings WHERE key IN ('webPort', 'webBasePath', 'webListen', 'subPort', 'subPath', 'subListen', 'subEnable', 'subDomain', 'subURI')")
 
-# Настройки
 settings = [
     ('webPort', PANEL_PORT), ('webBasePath', WEB_PATH), ('webListen', '127.0.0.1'),
     ('subPort', SUB_PORT), ('subPath', SUB_PATH), ('subListen', '127.0.0.1'),
@@ -133,8 +131,20 @@ settings = [
 ]
 c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", settings)
 
-# Генерация ключей
-clients = ["zfold", "passwall", "work", "TV", "note10"]
+# Генерируем ОДИН раз данные для 5 клиентов
+client_names = ["zfold", "passwall", "work", "TV", "note10"]
+client_data = []
+
+for name in client_names:
+    c_uuid = str(uuid.uuid4())
+    c_sub = secrets.token_hex(8)
+    client_data.append({"name": name, "uuid": c_uuid, "sub_id": c_sub})
+    
+    # Записываем клиента в базу ОДИН раз
+    c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", 
+              (name, c_sub, c_uuid, c_uuid, c_uuid))
+    client_data[-1]["db_id"] = c.lastrowid
+
 xray_bin = subprocess.check_output("find /usr/local/x-ui/bin/ -name 'xray*' -type f | head -n 1", shell=True).decode().strip()
 keys = subprocess.check_output(f"{xray_bin} x25519", shell=True).decode()
 priv_key = [line.split()[-1] for line in keys.split('\n') if 'Private' in line][0]
@@ -144,9 +154,12 @@ pub_key = [line.split()[-1] for line in keys.split('\n') if 'Password' in line o
 if "1" in PROTOCOLS:
     short_ids = [secrets.token_hex(n)[:n] for n in [6, 2, 4, 8, 16, 10, 12, 14]]
     spider_x = f"/{secrets.token_urlsafe(10)[:15]}"
-
-    # JSON без клиентов!
-    settings_json = json.dumps({"decryption": "none", "encryption": "none"})
+    
+    vless_clients = []
+    for cd in client_data:
+        vless_clients.append({"id": cd["uuid"], "email": cd["name"], "subId": cd["sub_id"], "flow": "", "limitIp": 0, "totalGB": 0, "expiryTime": 0, "enable": True, "tgId": 0, "reset": 0})
+        
+    settings_json = json.dumps({"clients": vless_clients, "decryption": "none", "encryption": "none"})
     stream_json = json.dumps({
         "network": "xhttp", "security": "reality",
         "xhttpSettings": {"path": "/api/v3/stream", "mode": "stream-one", "xPaddingBytes": "100-1000", "scMaxBufferedPosts": 30, "scStreamUpServerSecs": "20-80"},
@@ -155,17 +168,16 @@ if "1" in PROTOCOLS:
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'vless', ?, ?, 'in-443-tcp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
-    
-    for name in clients:
-        c_uuid = str(uuid.uuid4())
-        c_sub = secrets.token_hex(8)
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (f"{name}@vless", c_sub, c_uuid, c_uuid, c_uuid))
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (c.lastrowid, inbound_id))
+    for cd in client_data:
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
 # 2. Hysteria 2
 if "2" in PROTOCOLS:
-    # JSON без клиентов!
-    settings_json = json.dumps({"version": 2})
+    hy_clients = []
+    for cd in client_data:
+        hy_clients.append({"auth": cd["uuid"], "email": cd["name"]})
+        
+    settings_json = json.dumps({"clients": hy_clients, "version": 2})
     stream_json = json.dumps({
         "network": "hysteria",
         "hysteriaSettings": {"version": 2, "udpIdleTimeout": 60, "masquerade": {"type": "proxy", "dir": "", "url": f"https://{DOMAIN}/", "rewriteHost": True, "insecure": False, "content": "", "headers": {}, "statusCode": 0}},
@@ -179,15 +191,16 @@ if "2" in PROTOCOLS:
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'hysteria', ?, ?, 'in-443-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
-
-    for name in clients:
-        c_key = secrets.token_hex(8)
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (f"{name}@hy2", secrets.token_hex(8), c_key, c_key, c_key))
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (c.lastrowid, inbound_id))
+    for cd in client_data:
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
 # 3. Masque
 if "3" in PROTOCOLS:
-    settings_json = json.dumps({"address": ["10.14.0.1/24", "fd14::1/64"]})
+    masque_clients = []
+    for cd in client_data:
+        masque_clients.append({"email": cd["name"], "pass": cd["uuid"]})
+        
+    settings_json = json.dumps({"clients": masque_clients, "address": ["10.14.0.1/24", "fd14::1/64"]})
     stream_json = json.dumps({
         "network": "masque", "security": "tls",
         "masqueSettings": {"path": "/.well-known/masque/ip/*/*/"},
@@ -195,21 +208,19 @@ if "3" in PROTOCOLS:
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 59215, 'masque', ?, ?, 'inbound-59215-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
+    for cd in client_data:
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-    for name in clients:
-        c_key = secrets.token_hex(8)
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (f"{name}@masque", secrets.token_hex(8), c_key, c_key, c_key))
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (c.lastrowid, inbound_id))
-
-# 4. SOCKS5
+# 4. SOCKS5 (добавим 2 отдельных клиента, итого 7)
 if "4" in PROTOCOLS:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
-    settings_json = json.dumps({"auth": "password", "udp": True})
-    c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-22644-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
-    inbound_id = c.lastrowid
     for cl in socks_clients:
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (f"{cl['user']}@socks", secrets.token_hex(8), cl['pass'], cl['pass'], cl['pass']))
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (c.lastrowid, inbound_id))
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (cl["user"], secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
+        socks_db_id = c.lastrowid
+        settings_json = json.dumps({"auth": "password", "accounts": [{"user": cl["user"], "pass": cl["pass"]}], "udp": True})
+        c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-22644-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
+        inbound_id = c.lastrowid
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (socks_db_id, inbound_id))
 
 # Чистый шаблон
 template = {
@@ -220,7 +231,7 @@ template = {
 c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)", (json.dumps(template),))
 conn.commit()
 conn.close()
-print("\033[0;32mБаза заполнена (JSON точно по шаблону)!\033[0m")
+print("\033[0;32mУспешно создано ровно 5 клиентов (и 2 для SOCKS)!\033[0m")
 PYEOF
 
 # Nginx
