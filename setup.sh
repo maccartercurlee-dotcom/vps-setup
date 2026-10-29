@@ -122,7 +122,7 @@ export DB_KEY_PATH="$KEY_PATH"
 export PROTOCOLS="$PROTOCOLS"
 export USE_OLD_JSON="$USE_OLD_JSON"
 
-# --- ВНЕДРЕНИЕ В БАЗУ ---
+# --- ВНЕДРЕНИЕ В БАЗУ (С УНИКАЛЬНЫМИ EMAIL) ---
 echo -e "${YELLOW}Генерация и внедрение конфигурации...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess
@@ -182,9 +182,9 @@ if "1" in protocols:
     for name in clients:
         c_key = get_key(name, "vless")
         c_sub_id = secrets.token_hex(8)
-        vless_clients.append({"id": c_key, "flow": "", "email": f"{name}@{os.environ['DB_DOMAIN']}", "limitIp": 0, "totalGB": 0, "expiryTime": 0, "enable": True, "tgId": 0, "subId": c_sub_id, "reset": 0})
-        # Заполняем uuid, password и auth для совместимости
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (f"{name}@{os.environ['DB_DOMAIN']}", c_sub_id, c_key, c_key, c_key))
+        email_vless = f"{name}@vless"
+        vless_clients.append({"id": c_key, "flow": "", "email": email_vless, "limitIp": 0, "totalGB": 0, "expiryTime": 0, "enable": True, "tgId": 0, "subId": c_sub_id, "reset": 0})
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_vless, c_sub_id, c_key, c_key, c_key))
     
     settings_json = json.dumps({"clients": vless_clients, "decryption": "none"})
     stream_json = json.dumps({
@@ -195,15 +195,17 @@ if "1" in protocols:
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'vless', ?, ?, 'inbound-443', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
-    for name in clients: c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{name}@{os.environ['DB_DOMAIN']}"))
+    for name in clients: 
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{name}@vless"))
 
 # 2. Hysteria 2
 if "2" in protocols:
     hy_clients = []
     for name in clients:
         c_key = get_key(name, "hysteria")
-        hy_clients.append({"auth": c_key, "email": name})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (name, secrets.token_hex(8), c_key, c_key, c_key))
+        email_hy = f"{name}@hy2"
+        hy_clients.append({"auth": c_key, "email": email_hy})
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_hy, secrets.token_hex(8), c_key, c_key, c_key))
     settings_json = json.dumps({"clients": hy_clients, "version": 2})
     stream_json = json.dumps({
         "network": "hysteria", "security": "tls",
@@ -213,15 +215,17 @@ if "2" in protocols:
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'hysteria', ?, ?, 'inbound-443-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
-    for name in clients: c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, name))
+    for name in clients: 
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{name}@hy2"))
 
 # 3. Masque
 if "3" in protocols:
     masque_clients = []
     for name in clients:
         c_key = get_key(name, "masque")
-        masque_clients.append({"email": name, "pass": c_key})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (name, secrets.token_hex(8), c_key, c_key, c_key))
+        email_masque = f"{name}@masque"
+        masque_clients.append({"email": email_masque, "pass": c_key})
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_masque, secrets.token_hex(8), c_key, c_key, c_key))
     settings_json = json.dumps({"clients": masque_clients, "address": ["10.14.0.1/24", "fd14::1/64"]})
     stream_json = json.dumps({
         "network": "masque", "security": "tls",
@@ -230,17 +234,20 @@ if "3" in protocols:
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 59215, 'masque', ?, ?, 'inbound-59215-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
-    for name in clients: c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, name))
+    for name in clients: 
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{name}@masque"))
 
 # 4. SOCKS5
 if "4" in protocols:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
     for cl in socks_clients:
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (cl["user"], secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
+        email_socks = f"{cl['user']}@socks"
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_socks, secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
     settings_json = json.dumps({"auth": "password", "accounts": socks_clients, "udp": True})
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-22644-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
     inbound_id = c.lastrowid
-    for cl in socks_clients: c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, cl["user"]))
+    for cl in socks_clients: 
+        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{cl['user']}@socks"))
 
 # Чистый шаблон Xray
 template = {
