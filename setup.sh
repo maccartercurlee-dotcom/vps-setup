@@ -8,14 +8,15 @@ NC='\033[0m'
 
 clear
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}     ФИНАЛЬНЫЙ УСТАНОВЩИК (ИСПРАВЛЕНЫ ВСЕ БАГИ UI)  ${NC}"
+echo -e "${GREEN}     АБСОЛЮТНО ФИНАЛЬНЫЙ УСТАНОВЩИК (ВСЁ ИСПРАВЛЕНО) ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 
+# Защита от русских букв в домене
 read -p "Введите домен (напр. llm.atms2006.ru): " RAW_DOMAIN
 DOMAIN=$(echo "$RAW_DOMAIN" | tr -cd 'a-zA-Z0-9.-')
 
 if [ -z "$DOMAIN" ]; then
-    echo -e "${RED}Ошибка: домен пустой!${NC}"
+    echo -e "${RED}Ошибка: домен пустой или содержит недопустимые символы!${NC}"
     exit 1
 fi
 
@@ -27,11 +28,11 @@ echo "4) AmneziaWG (UDP 22644)"
 echo "5) SOCKS5 (TCP 65102)"
 read -p "Ваш выбор: " PROTOCOLS
 
-echo -e "\n${YELLOW}Выберите тип сайта-заглушки:${NC}"
-echo "1) Nexus AI Node"
-echo "2) SQL Dump"
-echo "3) Admin Panel"
-echo "4) TeleHealth Portal"
+echo -e "\n${YELLOW}Выберите тип сайта-заглушки (Honeypot):${NC}"
+echo "1) Nexus AI Node (Строгий интерфейс ИИ)"
+echo "2) SQL Dump (Слитая база данных)"
+echo "3) Admin Panel (Панель админа)"
+echo "4) TeleHealth Portal (Медицинский портал)"
 read -p "Ваш выбор (1-4): " DECOY_CHOICE
 
 PANEL_USER="admin"
@@ -43,7 +44,7 @@ PANEL_PORT=$(( ( RANDOM % 50000 ) + 10000 ))
 SUB_PORT=$(( ( RANDOM % 50000 ) + 10000 ))
 NGINX_PORT="40000"
 
-echo -e "\n${YELLOW}Очистка...${NC}"
+echo -e "\n${YELLOW}Очистка старых установок...${NC}"
 systemctl stop x-ui nginx >/dev/null 2>&1 || true
 apt purge -y nginx nginx-common nginx-core >/dev/null 2>&1 || true
 rm -rf /etc/x-ui /usr/local/x-ui /usr/bin/x-ui /etc/systemd/system/x-ui.service /etc/nginx /var/www/decoy /var/www/certbot
@@ -66,13 +67,13 @@ sysctl --system >/dev/null 2>&1
 # Ханипот
 mkdir -p /var/www/decoy /var/www/certbot
 if [ "$DECOY_CHOICE" = "1" ]; then
-    echo '<!DOCTYPE html><html><head><title>Nexus AI</title></head><body style="background:#0f172a;color:#fff;text-align:center;padding-top:20vh"><h1>Nexus AI Node</h1></body></html>' > /var/www/decoy/index.html
+    echo '<!DOCTYPE html><html><head><title>Nexus AI</title></head><body style="background:#0f172a;color:#fff;text-align:center;padding-top:20vh;font-family:sans-serif"><h1>Nexus AI Node</h1><p>Restricted Access Area</p></body></html>' > /var/www/decoy/index.html
 elif [ "$DECOY_CHOICE" = "2" ]; then
-    echo '<!DOCTYPE html><html><body style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;padding:20px">-- MySQL dump<br>CREATE TABLE users;</body></html>' > /var/www/decoy/index.html
+    echo '<!DOCTYPE html><html><body style="background:#1e1e1e;color:#d4d4d4;font-family:monospace;padding:20px">-- MySQL dump 10.13<br>-- Host: localhost<br>CREATE TABLE users (id INT, login VARCHAR);<br>INSERT INTO users VALUES (1, "admin");</body></html>' > /var/www/decoy/index.html
 elif [ "$DECOY_CHOICE" = "3" ]; then
-    echo '<!DOCTYPE html><html><body style="background:#2d3748;color:#fff;text-align:center;padding-top:20vh"><h1>Admin Panel</h1></body></html>' > /var/www/decoy/index.html
+    echo '<!DOCTYPE html><html><body style="background:#2d3748;color:#fff;text-align:center;padding-top:20vh;font-family:sans-serif"><h1>Admin Panel</h1><input type="text" placeholder="Login"><br><br><button>Sign In</button></body></html>' > /var/www/decoy/index.html
 else
-    echo '<!DOCTYPE html><html><body style="background:#f0f4f8;color:#000;text-align:center;padding-top:20vh"><h1>TeleHealth Portal</h1></body></html>' > /var/www/decoy/index.html
+    echo '<!DOCTYPE html><html><body style="background:#f0f4f8;color:#000;text-align:center;padding-top:20vh;font-family:sans-serif"><h1>TeleHealth Portal</h1><p>Medical Staff Login</p></body></html>' > /var/www/decoy/index.html
 fi
 
 CERT_PATH="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
@@ -115,7 +116,7 @@ export DB_CERT_PATH="$CERT_PATH"
 export DB_KEY_PATH="$KEY_PATH"
 export PROTOCOLS="$PROTOCOLS"
 
-echo -e "${YELLOW}Запись конфигурации (с исправлениями)...${NC}"
+echo -e "${YELLOW}Запись конфигурации в базу данных...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess, base64
 
@@ -132,6 +133,7 @@ db = '/etc/x-ui/x-ui.db'
 conn = sqlite3.connect(db)
 c = conn.cursor()
 
+# Полная очистка
 c.execute("DELETE FROM clients")
 c.execute("DELETE FROM client_inbounds")
 c.execute("DELETE FROM inbounds")
@@ -147,11 +149,11 @@ c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", settings)
 client_names = ["zfold", "passwall", "work", "TV", "note10"]
 client_data = []
 
+# Создаем 5 базовых клиентов и выдаем им уникальные IP для Амнезии
 for i, name in enumerate(client_names):
     c_uuid = str(uuid.uuid4())
     c_sub = secrets.token_hex(8)
-    # Для Wireguard/AmneziaWG генерируем уникальные IP (10.8.1.2, 10.8.1.3 и т.д.)
-    wg_ip = f"10.8.1.{i+2}/32"
+    wg_ip = f"10.8.1.{i+2}/32" # Уникальный IP для WireGuard
     client_data.append({"name": name, "uuid": c_uuid, "sub_id": c_sub, "wg_ip": wg_ip})
     
     c.execute("INSERT OR REPLACE INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", 
@@ -195,9 +197,8 @@ if "2" in PROTOCOLS:
     for cd in client_data:
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 3. Masque (С ИСПРАВЛЕННЫМ ID)
+# 3. Masque (С добавленным "id" и ECH-ключами)
 if "3" in PROTOCOLS:
-    # Добавили "id", чтобы панель не ругалась "empty client ID"
     masque_clients = [{"id": cd["uuid"], "email": cd["name"], "pass": cd["uuid"]} for cd in client_data]
     settings_json = json.dumps({"clients": masque_clients, "address": ["10.14.0.1/24", "fd14::1/64"]})
     stream_json = json.dumps({
@@ -209,7 +210,7 @@ if "3" in PROTOCOLS:
     for cd in client_data:
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 4. AmneziaWG (ИСПРАВЛЕНЫ IP)
+# 4. AmneziaWG (С добавленным "id" и уникальными IP)
 if "4" in PROTOCOLS:
     def gen_wg_key(): return base64.b64encode(secrets.token_bytes(32)).decode('utf-8')
     awg_clients = []
@@ -219,7 +220,7 @@ if "4" in PROTOCOLS:
             "email": cd["name"],
             "privateKey": gen_wg_key(),
             "publicKey": gen_wg_key(),
-            "allowedIPs": [cd["wg_ip"]] # У каждого свой IP!
+            "allowedIPs": [cd["wg_ip"]]
         })
         
     settings_json = json.dumps({
@@ -232,7 +233,7 @@ if "4" in PROTOCOLS:
     for cd in client_data:
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 5. SOCKS5
+# 5. SOCKS5 (Создаем 1 инбаунд и 2 клиента)
 if "5" in PROTOCOLS:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
     settings_json = json.dumps({"auth": "password", "accounts": socks_clients, "udp": True})
@@ -243,6 +244,7 @@ if "5" in PROTOCOLS:
         socks_db_id = c.lastrowid
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (socks_db_id, inbound_id))
 
+# Чистый шаблон Xray
 template = {
     "log": {"loglevel": "warning"},
     "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],
@@ -251,10 +253,10 @@ template = {
 c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)", (json.dumps(template),))
 conn.commit()
 conn.close()
-print("\033[0;32mУспешно! Все баги исправлены.\033[0m")
+print("\033[0;32mУспешно! Все протоколы созданы без ошибок UI.\033[0m")
 PYEOF
 
-# Nginx
+# Настройка Nginx (Fallback)
 if [[ "$PROTOCOLS" == *"1"* ]]; then
     LISTEN_NGINX="listen 127.0.0.1:${NGINX_PORT} ssl http2;"
     FALLBACK_CONFIG="server {
