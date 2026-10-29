@@ -123,7 +123,7 @@ export DB_CERT_PATH="$CERT_PATH"
 export DB_KEY_PATH="$KEY_PATH"
 export PROTOCOLS="$PROTOCOLS"
 
-echo -e "${YELLOW}Запись конфигурации (ровно 5 клиентов)...${NC}"
+echo -e "${YELLOW}Запись конфигурации...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess
 
@@ -160,7 +160,7 @@ for name in client_names:
     c_sub = secrets.token_hex(8)
     client_data.append({"name": name, "uuid": c_uuid, "sub_id": c_sub})
     
-    c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", 
+    c.execute("INSERT OR REPLACE INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", 
               (name, c_sub, c_uuid, c_uuid, c_uuid))
     client_data[-1]["db_id"] = c.lastrowid
 
@@ -185,10 +185,11 @@ if "1" in PROTOCOLS:
         "realitySettings": {"show": False, "xver": 0, "target": "127.0.0.1:40000", "serverNames": [DOMAIN], "privateKey": priv_key, "shortIds": short_ids, "settings": {"publicKey": pub_key, "fingerprint": "firefox", "spiderX": spider_x}},
         "sockopt": {"tcpFastOpen": True, "tcpcongestion": "bbr"}
     })
-    c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'vless', ?, ?, 'in-443-tcp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"]}', 1)", (settings_json, stream_json))
+    # ИСПОЛЬЗУЕМ INSERT OR REPLACE!
+    c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'vless', ?, ?, 'in-443-tcp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
     for cd in client_data:
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
+        c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
 # 2. Hysteria 2
 if "2" in PROTOCOLS:
@@ -208,10 +209,10 @@ if "2" in PROTOCOLS:
         },
         "finalmask": {"quicParams": {"congestion": "bbr", "maxIncomingStreams": 2048, "initStreamReceiveWindow": 16777216, "maxStreamReceiveWindow": 16777216, "initConnectionReceiveWindow": 33554432, "maxConnectionReceiveWindow": 33554432, "bbrProfile": "aggressive"}}
     })
-    c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'hysteria', ?, ?, 'in-443-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
+    c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'hysteria', ?, ?, 'in-443-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
     for cd in client_data:
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
+        c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
 # 3. Masque
 if "3" in PROTOCOLS:
@@ -225,25 +226,23 @@ if "3" in PROTOCOLS:
         "masqueSettings": {"path": "/.well-known/masque/ip/*/*/"},
         "tlsSettings": {"alpn": ["h3", "h2"], "certificates": [{"certificateFile": CERT_PATH, "keyFile": KEY_PATH}], "serverName": DOMAIN, "minVersion": "1.3", "maxVersion": "1.3"}
     })
-    c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 59215, 'masque', ?, ?, 'inbound-59215-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
+    c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 59215, 'masque', ?, ?, 'inbound-59215-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
     for cd in client_data:
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
+        c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 4. SOCKS5 (ИСПРАВЛЕНО: Один инбаунд, два клиента)
+# 4. SOCKS5
 if "4" in PROTOCOLS:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
     
-    # Создаем ОДИН инбаунд для SOCKS5
     settings_json = json.dumps({"auth": "password", "accounts": socks_clients, "udp": True})
-    c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-65102-tcp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
+    c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-65102-tcp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
     inbound_id = c.lastrowid
     
-    # Создаем клиентов и привязываем их к этому инбаунду
     for cl in socks_clients:
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (cl["user"], secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
+        c.execute("INSERT OR REPLACE INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (cl["user"], secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
         socks_db_id = c.lastrowid
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (socks_db_id, inbound_id))
+        c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (socks_db_id, inbound_id))
 
 template = {
     "log": {"loglevel": "warning"},
@@ -253,7 +252,7 @@ template = {
 c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)", (json.dumps(template),))
 conn.commit()
 conn.close()
-print("\033[0;32mУспешно создано ровно 5 клиентов + ханипот!\033[0m")
+print("\033[0;32mУспешно! Никаких ошибок.\033[0m")
 PYEOF
 
 # Nginx
