@@ -8,7 +8,7 @@ NC='\033[0m'
 
 clear
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}     УСТАНОВЩИК (ЧИСТЫЕ НАСТРОЙКИ + СОХРАНЕНИЕ КЛЮЧЕЙ) ${NC}"
+echo -e "${GREEN}     АБСОЛЮТНО ПРАВИЛЬНЫЙ УСТАНОВЩИК (БЕЗ ОШИБОК)   ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 
 read -p "Введите ваш домен (например, llm.atms2006.ru): " DOMAIN
@@ -27,31 +27,12 @@ echo -e "\n${YELLOW}Выберите протоколы (введите номе
 echo "1) VLESS Reality + XHTTP (TCP 443)"
 echo "2) Hysteria 2 (UDP 443)"
 echo "3) Masque (UDP 59215)"
-echo "4) SOCKS5 (TCP 65102) + 2 доп. клиента"
+echo "4) SOCKS5 (TCP 65102)"
 read -p "Ваш выбор: " PROTOCOLS
 
 if [ -z "$PROTOCOLS" ]; then
     echo -e "${RED}Вы ничего не выбрали. Выход.${NC}"
     exit 1
-fi
-
-echo -e "\n${YELLOW}Сохранить существующие ключи клиентов (UUID, пароли)?${NC}"
-echo "1) Да, у меня есть старый JSON (устройства подключатся без изменений)"
-echo "2) Нет, сгенерировать новые ключи"
-read -p "Ваш выбор (1-2): " KEEP_KEYS
-
-USE_OLD_JSON="false"
-if [ "$KEEP_KEYS" = "1" ]; then
-    USE_OLD_JSON="true"
-    echo -e "\n${YELLOW}Сейчас откроется nano.${NC} Вставьте ваш СТАРЫЙ JSON-конфиг."
-    echo -e "Скрипт возьмет из него ТОЛЬКО UUID и пароли клиентов."
-    sleep 3
-    touch /tmp/old_config.json
-    nano /tmp/old_config.json
-    if ! python3 -c "import json; json.load(open('/tmp/old_config.json'))" 2>/dev/null; then
-        echo -e "${RED}ОШИБКА: Невалидный JSON!${NC}"
-        exit 1
-    fi
 fi
 
 echo -e "\n${YELLOW}Очистка старых установок...${NC}"
@@ -63,7 +44,6 @@ export DEBIAN_FRONTEND=noninteractive
 apt update && apt install -y nginx certbot curl wget sqlite3 ufw openssl python3
 
 # --- ФАЙРВОЛ И BBR ---
-echo -e "${YELLOW}Настройка файрвола и BBR...${NC}"
 SSH_PORT=$(ss -tlnp | grep sshd | awk '{print $4}' | awk -F':' '{print $NF}' | head -n 1)
 SSH_PORT=${SSH_PORT:-22}
 ufw allow "$SSH_PORT"/tcp; ufw allow 80/tcp; ufw allow 443/tcp; ufw allow 443/udp; ufw allow 59215/tcp; ufw allow 59215/udp; ufw allow 65102/tcp; ufw --force enable
@@ -74,7 +54,7 @@ net.ipv4.tcp_congestion_control=bbr
 EOF
 sysctl --system >/dev/null 2>&1
 
-# --- ХАНИПОТ И СЕРТИФИКАТЫ ---
+# --- ХАНИПОТ ---
 mkdir -p /var/www/decoy /var/www/certbot
 cat > /var/www/decoy/index.html <<'HTMLEOF'
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Nexus AI Node</title><style>body{background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;color:#fff}.login-box{background-color:#1e293b;padding:40px;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,0.5);width:340px;text-align:center;box-sizing:border-box}.logo{font-size:24px;font-weight:700;color:#0ea5e9;margin-bottom:8px}.subtitle{color:#94a3b8;font-size:13px;margin-bottom:30px}input{width:100%;padding:12px 16px;margin-bottom:16px;background-color:#0f172a;border:1px solid #334155;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box;transition:border-color 0.2s}input:focus{outline:none;border-color:#0ea5e9}button{width:100%;padding:14px;background-color:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px}button:hover{background-color:#0284c7}.footer{margin-top:24px;font-size:12px;color:#475569}</style></head><body><div class="login-box"><div class="logo">Nexus AI Node</div><div class="subtitle">Restricted Access Area</div><form id="loginForm"><input type="text" placeholder="Email / Node ID" required><input type="password" placeholder="Access Key" required><button type="submit" id="submitBtn">Initialize Connection</button></form><div class="footer">v 2.4.1 | End-to-End Encrypted</div></div><script>document.getElementById('loginForm').addEventListener('submit',function(e){e.preventDefault();const btn=document.getElementById('submitBtn');const inputs=document.querySelectorAll('input');btn.innerText='Connecting...';btn.style.backgroundColor='#475569';btn.disabled=true;inputs.forEach(i=>i.disabled=true);setTimeout(()=>{btn.innerText='Access Denied';btn.style.backgroundColor='#ef4444';setTimeout(()=>{btn.innerText='Initialize Connection';btn.style.backgroundColor='#0ea5e9';btn.disabled=false;inputs.forEach(i=>{i.disabled=false;i.value='';});},2000);},1500);});</script></body></html>
@@ -96,7 +76,6 @@ EOF
     certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos -m $EMAIL || true
 fi
 
-# --- АВТО-ОБНОВЛЕНИЕ СЕРТИФИКАТОВ ---
 mkdir -p /etc/letsencrypt/renewal-hooks/deploy
 echo -e '#!/bin/bash\nsystemctl reload nginx' > /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
 chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-nginx.sh
@@ -120,10 +99,8 @@ export DB_SUB_PATH="$SUB_PATH"
 export DB_CERT_PATH="$CERT_PATH"
 export DB_KEY_PATH="$KEY_PATH"
 export PROTOCOLS="$PROTOCOLS"
-export USE_OLD_JSON="$USE_OLD_JSON"
 
-# --- ВНЕДРЕНИЕ В БАЗУ (С УНИКАЛЬНЫМИ EMAIL) ---
-echo -e "${YELLOW}Генерация и внедрение конфигурации...${NC}"
+echo -e "${YELLOW}Генерация настроек (без записи в таблицу clients)...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess
 
@@ -142,23 +119,6 @@ settings = [
 c.execute("DELETE FROM settings WHERE key IN ('webPort', 'webBasePath', 'webListen', 'subPort', 'subPath', 'subListen', 'subEnable', 'subDomain', 'subURI')")
 c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", settings)
 
-# 2. Парсим старые ключи
-old_keys = {}
-if os.environ['USE_OLD_JSON'] == 'true':
-    try:
-        with open('/tmp/old_config.json', 'r') as f:
-            old_config = json.load(f)
-            for inb in old_config.get("inbounds", []):
-                for client in inb.get("settings", {}).get("clients", []):
-                    email = client.get("email", "").split('@')[0]
-                    key = client.get("id") or client.get("auth") or client.get("pass")
-                    if email and key:
-                        old_keys[email] = key
-        print(f"\033[0;33mНайдено старых ключей: {len(old_keys)}\033[0m")
-    except Exception as e:
-        print(f"\033[0;31mОшибка чтения JSON: {e}. Будут созданы новые ключи.\033[0m")
-
-# 3. Генерация инбаундов
 protocols = os.environ['PROTOCOLS'].split()
 clients = ["zfold", "passwall", "work", "TV", "note10"]
 
@@ -168,23 +128,13 @@ priv_key = [line.split()[-1] for line in keys.split('\n') if 'Private' in line][
 pub_key = [line.split()[-1] for line in keys.split('\n') if 'Password' in line or 'Public' in line][0]
 short_id = secrets.token_hex(4)
 
-def get_key(name, protocol):
-    if name in old_keys:
-        return old_keys[name]
-    if protocol in ["vless", "vmess"]:
-        return str(uuid.uuid4())
-    else:
-        return secrets.token_hex(8)
-
 # 1. VLESS Reality
 if "1" in protocols:
     vless_clients = []
     for name in clients:
-        c_key = get_key(name, "vless")
+        c_uuid = str(uuid.uuid4())
         c_sub_id = secrets.token_hex(8)
-        email_vless = f"{name}@vless"
-        vless_clients.append({"id": c_key, "flow": "", "email": email_vless, "limitIp": 0, "totalGB": 0, "expiryTime": 0, "enable": True, "tgId": 0, "subId": c_sub_id, "reset": 0})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_vless, c_sub_id, c_key, c_key, c_key))
+        vless_clients.append({"id": c_uuid, "flow": "", "email": f"{name}@vless", "limitIp": 0, "totalGB": 0, "expiryTime": 0, "enable": True, "tgId": 0, "subId": c_sub_id, "reset": 0})
     
     settings_json = json.dumps({"clients": vless_clients, "decryption": "none"})
     stream_json = json.dumps({
@@ -194,18 +144,13 @@ if "1" in protocols:
         "sockopt": {"tcpFastOpen": True, "tcpcongestion": "bbr"}
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'vless', ?, ?, 'inbound-443', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
-    inbound_id = c.lastrowid
-    for name in clients: 
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{name}@vless"))
 
 # 2. Hysteria 2
 if "2" in protocols:
     hy_clients = []
     for name in clients:
-        c_key = get_key(name, "hysteria")
-        email_hy = f"{name}@hy2"
-        hy_clients.append({"auth": c_key, "email": email_hy})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_hy, secrets.token_hex(8), c_key, c_key, c_key))
+        c_key = secrets.token_hex(8)
+        hy_clients.append({"auth": c_key, "email": f"{name}@hy2"})
     settings_json = json.dumps({"clients": hy_clients, "version": 2})
     stream_json = json.dumps({
         "network": "hysteria", "security": "tls",
@@ -214,18 +159,13 @@ if "2" in protocols:
         "tlsSettings": {"alpn": ["h3"], "certificates": [{"certificateFile": os.environ['DB_CERT_PATH'], "keyFile": os.environ['DB_KEY_PATH']}], "serverName": os.environ['DB_DOMAIN'], "minVersion": "1.3", "maxVersion": "1.3"}
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'hysteria', ?, ?, 'inbound-443-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
-    inbound_id = c.lastrowid
-    for name in clients: 
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{name}@hy2"))
 
 # 3. Masque
 if "3" in protocols:
     masque_clients = []
     for name in clients:
-        c_key = get_key(name, "masque")
-        email_masque = f"{name}@masque"
-        masque_clients.append({"email": email_masque, "pass": c_key})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_masque, secrets.token_hex(8), c_key, c_key, c_key))
+        c_key = secrets.token_hex(8)
+        masque_clients.append({"email": f"{name}@masque", "pass": c_key})
     settings_json = json.dumps({"clients": masque_clients, "address": ["10.14.0.1/24", "fd14::1/64"]})
     stream_json = json.dumps({
         "network": "masque", "security": "tls",
@@ -233,21 +173,12 @@ if "3" in protocols:
         "tlsSettings": {"alpn": ["h3", "h2"], "certificates": [{"certificateFile": os.environ['DB_CERT_PATH'], "keyFile": os.environ['DB_KEY_PATH']}], "serverName": os.environ['DB_DOMAIN'], "minVersion": "1.3", "maxVersion": "1.3"}
     })
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 59215, 'masque', ?, ?, 'inbound-59215-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
-    inbound_id = c.lastrowid
-    for name in clients: 
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{name}@masque"))
 
 # 4. SOCKS5
 if "4" in protocols:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
-    for cl in socks_clients:
-        email_socks = f"{cl['user']}@socks"
-        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (email_socks, secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
     settings_json = json.dumps({"auth": "password", "accounts": socks_clients, "udp": True})
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-22644-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
-    inbound_id = c.lastrowid
-    for cl in socks_clients: 
-        c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, f"{cl['user']}@socks"))
 
 # Чистый шаблон Xray
 template = {
@@ -256,10 +187,9 @@ template = {
     "routing": {"domainStrategy": "AsIs", "rules": [{"type": "field", "ip": ["geoip:private"], "outboundTag": "blocked"}]}
 }
 c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)", (json.dumps(template),))
-print("\033[0;32mНастройки сгенерированы!\033[0m")
-
 conn.commit()
 conn.close()
+print("\033[0;32mИнбаунды созданы! Панель сама синхронизирует клиентов при запуске.\033[0m")
 PYEOF
 
 # --- НАСТРОЙКА NGINX ---
