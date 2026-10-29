@@ -8,17 +8,15 @@ NC='\033[0m'
 
 clear
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}     УСТАНОВЩИК (ТОЛЬКО ОПТИМАЛЬНЫЕ НАСТРОЙКИ)      ${NC}"
+echo -e "${GREEN}     УСТАНОВЩИК (ЧИСТЫЕ НАСТРОЙКИ + СОХРАНЕНИЕ КЛЮЧЕЙ) ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 
 read -p "Введите ваш домен (например, llm.atms2006.ru): " DOMAIN
 
-# Значения по умолчанию
 PANEL_USER="admin"
 PANEL_PASS="admin"
 EMAIL="mrcogahmed@gmail.com"
 
-# Генерация путей и портов
 WEB_PATH="/$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)/"
 SUB_PATH="/$(cat /dev/urandom | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)/"
 PANEL_PORT=$(( ( RANDOM % 50000 ) + 10000 ))
@@ -35,6 +33,25 @@ read -p "Ваш выбор: " PROTOCOLS
 if [ -z "$PROTOCOLS" ]; then
     echo -e "${RED}Вы ничего не выбрали. Выход.${NC}"
     exit 1
+fi
+
+echo -e "\n${YELLOW}Сохранить существующие ключи клиентов (UUID, пароли)?${NC}"
+echo "1) Да, у меня есть старый JSON (устройства подключатся без изменений)"
+echo "2) Нет, сгенерировать новые ключи"
+read -p "Ваш выбор (1-2): " KEEP_KEYS
+
+USE_OLD_JSON="false"
+if [ "$KEEP_KEYS" = "1" ]; then
+    USE_OLD_JSON="true"
+    echo -e "\n${YELLOW}Сейчас откроется nano.${NC} Вставьте ваш СТАРЫЙ JSON-конфиг."
+    echo -e "Скрипт возьмет из него ТОЛЬКО UUID и пароли клиентов."
+    sleep 3
+    touch /tmp/old_config.json
+    nano /tmp/old_config.json
+    if ! python3 -c "import json; json.load(open('/tmp/old_config.json'))" 2>/dev/null; then
+        echo -e "${RED}ОШИБКА: Невалидный JSON!${NC}"
+        exit 1
+    fi
 fi
 
 echo -e "\n${YELLOW}Очистка старых установок...${NC}"
@@ -103,8 +120,9 @@ export DB_SUB_PATH="$SUB_PATH"
 export DB_CERT_PATH="$CERT_PATH"
 export DB_KEY_PATH="$KEY_PATH"
 export PROTOCOLS="$PROTOCOLS"
+export USE_OLD_JSON="$USE_OLD_JSON"
 
-# --- ВНЕДРЕНИЕ В БАЗУ (ОПТИМАЛЬНЫЕ НАСТРОЙКИ) ---
+# --- ВНЕДРЕНИЕ В БАЗУ ---
 echo -e "${YELLOW}Генерация и внедрение конфигурации...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess
@@ -124,6 +142,23 @@ settings = [
 c.execute("DELETE FROM settings WHERE key IN ('webPort', 'webBasePath', 'webListen', 'subPort', 'subPath', 'subListen', 'subEnable', 'subDomain', 'subURI')")
 c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", settings)
 
+# 2. Парсим старые ключи
+old_keys = {}
+if os.environ['USE_OLD_JSON'] == 'true':
+    try:
+        with open('/tmp/old_config.json', 'r') as f:
+            old_config = json.load(f)
+            for inb in old_config.get("inbounds", []):
+                for client in inb.get("settings", {}).get("clients", []):
+                    email = client.get("email", "").split('@')[0]
+                    key = client.get("id") or client.get("auth") or client.get("pass")
+                    if email and key:
+                        old_keys[email] = key
+        print(f"\033[0;33mНайдено старых ключей: {len(old_keys)}\033[0m")
+    except Exception as e:
+        print(f"\033[0;31mОшибка чтения JSON: {e}. Будут созданы новые ключи.\033[0m")
+
+# 3. Генерация инбаундов
 protocols = os.environ['PROTOCOLS'].split()
 clients = ["zfold", "passwall", "work", "TV", "note10"]
 
@@ -133,13 +168,23 @@ priv_key = [line.split()[-1] for line in keys.split('\n') if 'Private' in line][
 pub_key = [line.split()[-1] for line in keys.split('\n') if 'Password' in line or 'Public' in line][0]
 short_id = secrets.token_hex(4)
 
+def get_key(name, protocol):
+    if name in old_keys:
+        return old_keys[name]
+    if protocol in ["vless", "vmess"]:
+        return str(uuid.uuid4())
+    else:
+        return secrets.token_hex(8)
+
 # 1. VLESS Reality
 if "1" in protocols:
     vless_clients = []
     for name in clients:
-        c_uuid = str(uuid.uuid4()); c_sub_id = secrets.token_hex(8)
-        vless_clients.append({"id": c_uuid, "flow": "", "email": f"{name}@{os.environ['DB_DOMAIN']}", "limitIp": 0, "totalGB": 0, "expiryTime": 0, "enable": True, "tgId": 0, "subId": c_sub_id, "reset": 0})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", (f"{name}@{os.environ['DB_DOMAIN']}", c_sub_id, c_uuid))
+        c_key = get_key(name, "vless")
+        c_sub_id = secrets.token_hex(8)
+        vless_clients.append({"id": c_key, "flow": "", "email": f"{name}@{os.environ['DB_DOMAIN']}", "limitIp": 0, "totalGB": 0, "expiryTime": 0, "enable": True, "tgId": 0, "subId": c_sub_id, "reset": 0})
+        # Заполняем uuid, password и auth для совместимости
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (f"{name}@{os.environ['DB_DOMAIN']}", c_sub_id, c_key, c_key, c_key))
     
     settings_json = json.dumps({"clients": vless_clients, "decryption": "none"})
     stream_json = json.dumps({
@@ -156,9 +201,9 @@ if "1" in protocols:
 if "2" in protocols:
     hy_clients = []
     for name in clients:
-        auth = secrets.token_hex(8)
-        hy_clients.append({"auth": auth, "email": name})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", (name, secrets.token_hex(8), auth))
+        c_key = get_key(name, "hysteria")
+        hy_clients.append({"auth": c_key, "email": name})
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (name, secrets.token_hex(8), c_key, c_key, c_key))
     settings_json = json.dumps({"clients": hy_clients, "version": 2})
     stream_json = json.dumps({
         "network": "hysteria", "security": "tls",
@@ -174,9 +219,9 @@ if "2" in protocols:
 if "3" in protocols:
     masque_clients = []
     for name in clients:
-        auth = secrets.token_hex(8)
-        masque_clients.append({"email": name, "pass": auth})
-        c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", (name, secrets.token_hex(8), auth))
+        c_key = get_key(name, "masque")
+        masque_clients.append({"email": name, "pass": c_key})
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (name, secrets.token_hex(8), c_key, c_key, c_key))
     settings_json = json.dumps({"clients": masque_clients, "address": ["10.14.0.1/24", "fd14::1/64"]})
     stream_json = json.dumps({
         "network": "masque", "security": "tls",
@@ -191,20 +236,20 @@ if "3" in protocols:
 if "4" in protocols:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
     for cl in socks_clients:
-        c.execute("INSERT INTO clients (email, sub_id, uuid, enable) VALUES (?, ?, ?, 1)", (cl["user"], secrets.token_hex(8), cl["pass"]))
+        c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (cl["user"], secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
     settings_json = json.dumps({"auth": "password", "accounts": socks_clients, "udp": True})
     c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-22644-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
     inbound_id = c.lastrowid
     for cl in socks_clients: c.execute("INSERT INTO client_inbounds (client_id, inbound_id) SELECT id, ? FROM clients WHERE email = ?", (inbound_id, cl["user"]))
 
-# Шаблон Xray (только direct и blocked, никаких мертвых серверов)
+# Чистый шаблон Xray
 template = {
     "log": {"loglevel": "warning"},
     "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],
     "routing": {"domainStrategy": "AsIs", "rules": [{"type": "field", "ip": ["geoip:private"], "outboundTag": "blocked"}]}
 }
 c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)", (json.dumps(template),))
-print("\033[0;32mОптимальные настройки сгенерированы!\033[0m")
+print("\033[0;32mНастройки сгенерированы!\033[0m")
 
 conn.commit()
 conn.close()
