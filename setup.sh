@@ -8,7 +8,7 @@ NC='\033[0m'
 
 clear
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}     АБСОЛЮТНО ФИНАЛЬНЫЙ УСТАНОВЩИК (ВСЁ ИСПРАВЛЕНО) ${NC}"
+echo -e "${GREEN}     АБСОЛЮТНО ФИНАЛЬНЫЙ УСТАНОВЩИК (ВСЁ РАБОТАЕТ)  ${NC}"
 echo -e "${GREEN}====================================================${NC}"
 
 # Защита от русских букв в домене
@@ -24,7 +24,7 @@ echo -e "\n${YELLOW}Выберите протоколы (1 2 3 4 5):${NC}"
 echo "1) VLESS Reality + XHTTP (TCP 443)"
 echo "2) Hysteria 2 (UDP 443)"
 echo "3) Masque с ECH (UDP 59215)"
-echo "4) AmneziaWG (UDP 22644)"
+echo "4) AmneziaWG (UDP 58737)"
 echo "5) SOCKS5 (TCP 65102)"
 read -p "Ваш выбор: " PROTOCOLS
 
@@ -52,10 +52,10 @@ rm -rf /etc/x-ui /usr/local/x-ui /usr/bin/x-ui /etc/systemd/system/x-ui.service 
 export DEBIAN_FRONTEND=noninteractive
 apt update && apt install -y nginx certbot curl wget sqlite3 ufw openssl python3
 
-# Файрвол
+# Файрвол (Открываем 58737 для Амнезии!)
 SSH_PORT=$(ss -tlnp | grep sshd | awk '{print $4}' | awk -F':' '{print $NF}' | head -n 1)
 SSH_PORT=${SSH_PORT:-22}
-ufw allow "$SSH_PORT"/tcp; ufw allow 80/tcp; ufw allow 443/tcp; ufw allow 443/udp; ufw allow 59215/tcp; ufw allow 59215/udp; ufw allow 22644/udp; ufw allow 65102/tcp; ufw --force enable
+ufw allow "$SSH_PORT"/tcp; ufw allow 80/tcp; ufw allow 443/tcp; ufw allow 443/udp; ufw allow 59215/tcp; ufw allow 59215/udp; ufw allow 58737/udp; ufw allow 65102/tcp; ufw --force enable
 
 # BBR
 cat > /etc/sysctl.d/99-bbr.conf <<EOF
@@ -133,7 +133,6 @@ db = '/etc/x-ui/x-ui.db'
 conn = sqlite3.connect(db)
 c = conn.cursor()
 
-# Полная очистка
 c.execute("DELETE FROM clients")
 c.execute("DELETE FROM client_inbounds")
 c.execute("DELETE FROM inbounds")
@@ -149,11 +148,10 @@ c.executemany("INSERT INTO settings (key, value) VALUES (?, ?)", settings)
 client_names = ["zfold", "passwall", "work", "TV", "note10"]
 client_data = []
 
-# Создаем 5 базовых клиентов и выдаем им уникальные IP для Амнезии
 for i, name in enumerate(client_names):
     c_uuid = str(uuid.uuid4())
     c_sub = secrets.token_hex(8)
-    wg_ip = f"10.8.1.{i+2}/32" # Уникальный IP для WireGuard
+    wg_ip = f"10.8.1.{i+2}/32" # Уникальный IP для AmneziaWG
     client_data.append({"name": name, "uuid": c_uuid, "sub_id": c_sub, "wg_ip": wg_ip})
     
     c.execute("INSERT OR REPLACE INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", 
@@ -197,7 +195,7 @@ if "2" in PROTOCOLS:
     for cd in client_data:
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 3. Masque (С добавленным "id" и ECH-ключами)
+# 3. Masque (С ECH)
 if "3" in PROTOCOLS:
     masque_clients = [{"id": cd["uuid"], "email": cd["name"], "pass": cd["uuid"]} for cd in client_data]
     settings_json = json.dumps({"clients": masque_clients, "address": ["10.14.0.1/24", "fd14::1/64"]})
@@ -210,7 +208,7 @@ if "3" in PROTOCOLS:
     for cd in client_data:
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 4. AmneziaWG (С добавленным "id" и уникальными IP)
+# 4. AmneziaWG (Порт 58737, пустой streamSettings)
 if "4" in PROTOCOLS:
     def gen_wg_key(): return base64.b64encode(secrets.token_bytes(32)).decode('utf-8')
     awg_clients = []
@@ -227,13 +225,13 @@ if "4" in PROTOCOLS:
         "clients": awg_clients,
         "server": {"contentPaddingAddition": "23-38", "disableCookies": True, "h1": "115814108", "h2": "852147088", "h3": "1474351793", "h4": "1837283512", "headerProtectionKey": "W8bEcxe+OwkQgmVp+lEjq7K1aRNX3YLdpLvl3TMWMNo=", "i1": "<r 84>", "jc": 6, "jmax": 223, "jmin": 82, "keepaliveTimeout": "8-15", "maxHandshakeAttempts": "20-43", "mtu": 1380, "primaryDns": "8.8.8.8", "privateKey": "6H6TkkRFOOQ81znvuwpj/l/AcRhX0UA7ZhSAXsAUKGI=", "publicKey": "WAozJqH1FHI/hy5zneuVfiV0a6N451u2c7eGhkq4tjE=", "randomTrailers": True, "rejectAfterTime": "203-235", "rekeyAfterTime": "112-152", "rekeyTimeout": "5-7", "s1": 20, "s2": 106, "s3": 35, "s4": 13, "secondaryDns": "8.8.4.4", "subnetCidr": 24, "subnetIp": "10.8.1.0"}
     })
-    stream_json = json.dumps({"network": "amneziawg"})
-    c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 22644, 'amneziawg', ?, ?, 'in-22644-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"]}', 1)", (settings_json, stream_json))
+    stream_json = json.dumps({})
+    c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 58737, 'amneziawg', ?, ?, 'in-58737-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"]}', 1)", (settings_json, stream_json))
     inbound_id = c.lastrowid
     for cd in client_data:
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 5. SOCKS5 (Создаем 1 инбаунд и 2 клиента)
+# 5. SOCKS5
 if "5" in PROTOCOLS:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
     settings_json = json.dumps({"auth": "password", "accounts": socks_clients, "udp": True})
@@ -244,7 +242,6 @@ if "5" in PROTOCOLS:
         socks_db_id = c.lastrowid
         c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (socks_db_id, inbound_id))
 
-# Чистый шаблон Xray
 template = {
     "log": {"loglevel": "warning"},
     "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],
