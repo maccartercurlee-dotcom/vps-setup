@@ -26,7 +26,6 @@ echo "3) Masque (UDP 59215)"
 echo "4) SOCKS5 (TCP 65102)"
 read -p "Ваш выбор: " PROTOCOLS
 
-# --- ВЫБОР САЙТА-ЗАГЛУШКИ ---
 echo -e "\n${YELLOW}Выберите тип сайта-заглушки (Honeypot):${NC}"
 echo "1) Nexus AI Node (Строгий интерфейс входа в ИИ-систему)"
 echo "2) SQL Dump (Слитый дамп базы данных)"
@@ -231,15 +230,19 @@ if "3" in PROTOCOLS:
     for cd in client_data:
         c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
 
-# 4. SOCKS5
+# 4. SOCKS5 (ИСПРАВЛЕНО: Один инбаунд, два клиента)
 if "4" in PROTOCOLS:
     socks_clients = [{"user": "masha", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}, {"user": "sofa", "pass": "wlopfmAb531Mhptwb_oNgYOXpizblX5O"}]
+    
+    # Создаем ОДИН инбаунд для SOCKS5
+    settings_json = json.dumps({"auth": "password", "accounts": socks_clients, "udp": True})
+    c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-65102-tcp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
+    inbound_id = c.lastrowid
+    
+    # Создаем клиентов и привязываем их к этому инбаунду
     for cl in socks_clients:
         c.execute("INSERT INTO clients (email, sub_id, uuid, password, auth, enable) VALUES (?, ?, ?, ?, ?, 1)", (cl["user"], secrets.token_hex(8), cl["pass"], cl["pass"], cl["pass"]))
         socks_db_id = c.lastrowid
-        settings_json = json.dumps({"auth": "password", "accounts": [{"user": cl["user"], "pass": cl["pass"]}], "udp": True})
-        c.execute("INSERT INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 65102, 'socks', ?, '{}', 'in-22644-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\",\"quic\",\"fakedns\"],\"routeOnly\":true}', 1)", (settings_json,))
-        inbound_id = c.lastrowid
         c.execute("INSERT INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (socks_db_id, inbound_id))
 
 template = {
