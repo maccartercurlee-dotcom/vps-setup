@@ -1,4 +1,3 @@
-cat > final-test.sh << 'EOF'
 #!/bin/bash
 set -e
 
@@ -9,7 +8,7 @@ NC='\033[0m'
 
 clear
 echo -e "${GREEN}====================================================${NC}"
-echo -e "${GREEN}     ФИНАЛЬНЫЙ УСТАНОВЩИК (VLESS + HYSTERIA + AWG)  ${NC}"
+echo -e "${GREEN}     ФИНАЛЬНЫЙ УСТАНОВЩИК (VLESS + HYSTERIA + ONLINE)${NC}"
 echo -e "${GREEN}====================================================${NC}"
 
 read -p "Введите домен (напр. llm.atms2006.ru): " RAW_DOMAIN
@@ -20,12 +19,11 @@ if [ -z "$DOMAIN" ]; then
     exit 1
 fi
 
-# --- ВЫБОР САЙТА-ЗАГЛУШКИ ---
 echo -e "\n${YELLOW}Выберите тип сайта-заглушки (Honeypot):${NC}"
-echo "1) Nexus AI Node (Строгий интерфейс входа в ИИ-систему)"
-echo "2) SQL Dump (Слитый дамп базы данных)"
-echo "3) Admin Panel (Классическая страница входа)"
-echo "4) TeleHealth Portal (Портал телемедицины)"
+echo "1) Nexus AI Node"
+echo "2) SQL Dump"
+echo "3) Admin Panel"
+echo "4) TeleHealth Portal"
 read -p "Ваш выбор (1-4): " DECOY_CHOICE
 
 PANEL_USER="admin"
@@ -59,9 +57,8 @@ net.ipv4.tcp_congestion_control=bbr
 SYSCTL
 sysctl --system >/dev/null 2>&1
 
-# --- ГЕНЕРАЦИЯ ХАНИПОТА ---
+# Ханипот
 mkdir -p /var/www/decoy /var/www/certbot
-
 if [ "$DECOY_CHOICE" = "1" ]; then
     cat > /var/www/decoy/index.html <<'HTMLEOF'
 <!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><title>Nexus AI Node</title><style>body{background-color:#0f172a;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;color:#fff}.login-box{background-color:#1e293b;padding:40px;border-radius:12px;box-shadow:0 10px 25px rgba(0,0,0,0.5);width:340px;text-align:center;box-sizing:border-box}.logo{font-size:24px;font-weight:700;color:#0ea5e9;margin-bottom:8px}.subtitle{color:#94a3b8;font-size:13px;margin-bottom:30px}input{width:100%;padding:12px 16px;margin-bottom:16px;background-color:#0f172a;border:1px solid #334155;border-radius:6px;color:#fff;font-size:14px;box-sizing:border-box}input:focus{outline:none;border-color:#0ea5e9}button{width:100%;padding:14px;background-color:#0ea5e9;color:#fff;border:none;border-radius:6px;font-size:15px;font-weight:600;cursor:pointer;margin-top:8px}button:hover{background-color:#0284c7}.footer{margin-top:24px;font-size:12px;color:#475569}</style></head><body><div class="login-box"><div class="logo">Nexus AI Node</div><div class="subtitle">Restricted Access Area</div><form id="loginForm"><input type="text" placeholder="Email / Node ID" required><input type="password" placeholder="Access Key" required><button type="submit" id="submitBtn">Initialize Connection</button></form><div class="footer">v 2.4.1 | End-to-End Encrypted</div></div><script>document.getElementById('loginForm').addEventListener('submit',function(e){e.preventDefault();const btn=document.getElementById('submitBtn');const inputs=document.querySelectorAll('input');btn.innerText='Connecting...';btn.style.backgroundColor='#475569';btn.disabled=true;inputs.forEach(i=>i.disabled=true);setTimeout(()=>{btn.innerText='Access Denied';btn.style.backgroundColor='#ef4444';setTimeout(()=>{btn.innerText='Initialize Connection';btn.style.backgroundColor='#0ea5e9';btn.disabled=false;inputs.forEach(i=>{i.disabled=false;i.value='';});},2000);},1500);});</script></body></html>
@@ -84,13 +81,13 @@ CERT_PATH="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
 KEY_PATH="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
 
 if [ ! -f "$CERT_PATH" ]; then
-    cat > /etc/nginx/sites-available/decoy <<NGINXEOF
+    cat > /etc/nginx/sites-available/decoy <<EOF
 server {
     listen 80; server_name $DOMAIN;
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
     location / { root /var/www/decoy; index index.html; }
 }
-NGINXEOF
+EOF
     ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
     systemctl restart nginx
     certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos -m "mrcogahmed@gmail.com" || true
@@ -119,7 +116,7 @@ export DB_SUB_PATH="$SUB_PATH"
 export DB_CERT_PATH="$CERT_PATH"
 export DB_KEY_PATH="$KEY_PATH"
 
-echo -e "${YELLOW}Запись конфигурации (VLESS + Hysteria2)...${NC}"
+echo -e "${YELLOW}Запись конфигурации (VLESS + Hysteria2 + API Fix)...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess
 
@@ -138,7 +135,7 @@ c = conn.cursor()
 c.execute("DELETE FROM clients")
 c.execute("DELETE FROM client_inbounds")
 c.execute("DELETE FROM inbounds")
-c.execute("DELETE FROM settings WHERE key IN ('webPort', 'webBasePath', 'webListen', 'subPort', 'subPath', 'subListen', 'subEnable', 'subDomain', 'subURI')")
+c.execute("DELETE FROM settings WHERE key IN ('webPort', 'webBasePath', 'webListen', 'subPort', 'subPath', 'subListen', 'subEnable', 'subDomain', 'subURI', 'xrayTemplateConfig')")
 
 settings = [
     ('webPort', PANEL_PORT), ('webBasePath', WEB_PATH), ('webListen', '127.0.0.1'),
@@ -180,6 +177,7 @@ c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, s
 inbound_id = c.lastrowid
 for cd in client_data:
     c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
+    c.execute("INSERT OR REPLACE INTO client_traffics (inbound_id, enable, email, up, down, expiry_time, total, reset, last_online) VALUES (?, 1, ?, 0, 0, 0, 0, 0, 0)", (inbound_id, cd["name"]))
 
 # 2. Hysteria 2
 hy_clients = [{"id": cd["uuid"], "auth": cd["uuid"], "email": cd["name"]} for cd in client_data]
@@ -190,19 +188,54 @@ stream_json = json.dumps({
     "finalmask": {"quicParams": {"congestion": "bbr", "maxIncomingStreams": 2048, "initStreamReceiveWindow": 16777216, "maxStreamReceiveWindow": 16777216, "initConnectionReceiveWindow": 33554432, "maxConnectionReceiveWindow": 33554432, "bbrProfile": "aggressive"}}
 })
 c.execute("INSERT OR REPLACE INTO inbounds (user_id, port, protocol, settings, stream_settings, tag, sniffing, enable) VALUES (1, 443, 'hysteria', ?, ?, 'in-443-udp', '{\"enabled\":true,\"destOverride\":[\"http\",\"tls\"]}', 1)", (settings_json, stream_json))
-inbound_id = c.lastrowid
+inbound_id_hy = c.lastrowid
 for cd in client_data:
-    c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id))
+    c.execute("INSERT OR REPLACE INTO client_inbounds (client_id, inbound_id) VALUES (?, ?)", (cd["db_id"], inbound_id_hy))
 
+# 3. ИДЕАЛЬНЫЙ ШАБЛОН XRAY (С API И СТАТИСТИКОЙ)
 template = {
     "log": {"loglevel": "warning"},
-    "outbounds": [{"protocol": "freedom", "tag": "direct"}, {"protocol": "blackhole", "tag": "blocked"}],
-    "routing": {"domainStrategy": "AsIs", "rules": [{"type": "field", "ip": ["geoip:private"], "outboundTag": "blocked"}]}
+    "api": {
+        "services": ["HandlerService", "LoggerService", "StatsService", "RoutingService"],
+        "tag": "api"
+    },
+    "stats": {},
+    "policy": {
+        "levels": {
+            "0": {"statsUserUplink": True, "statsUserDownlink": True, "statsUserOnline": True}
+        },
+        "system": {
+            "statsInboundUplink": True, "statsInboundDownlink": True,
+            "statsOutboundUplink": True, "statsOutboundDownlink": True
+        }
+    },
+    "inbounds": [
+        {
+            "listen": "127.0.0.1",
+            "port": 62789,
+            "protocol": "dokodemo-door",
+            "settings": {"address": "127.0.0.1"},
+            "tag": "api",
+            "sniffing": {"enabled": False}
+        }
+    ],
+    "outbounds": [
+        {"protocol": "freedom", "tag": "direct"},
+        {"protocol": "blackhole", "tag": "blocked"}
+    ],
+    "routing": {
+        "domainStrategy": "AsIs",
+        "rules": [
+            {"type": "field", "inboundTag": ["api"], "outboundTag": "api"},
+            {"type": "field", "ip": ["geoip:private"], "outboundTag": "blocked"}
+        ]
+    }
 }
 c.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('xrayTemplateConfig', ?)", (json.dumps(template),))
+
 conn.commit()
 conn.close()
-print("\033[0;32mУспешно! VLESS и Hysteria2 созданы.\033[0m")
+print("\033[0;32mУспешно! VLESS, Hysteria2 и API для онлайна созданы.\033[0m")
 PYEOF
 
 # Настройка Nginx (Fallback)
@@ -249,5 +282,3 @@ echo -e "Логин: ${YELLOW}$PANEL_USER${NC} | Пароль: ${YELLOW}$PANEL_P
 echo -e "ССЫЛКА НА ПАНЕЛЬ: ${YELLOW}https://$DOMAIN$WEB_PATH${NC}"
 echo -e "ССЫЛКА НА ПОДПИСКИ: ${YELLOW}https://$DOMAIN$SUB_PATH${NC}"
 echo -e "${GREEN}====================================================${NC}"
-EOF
-chmod +x final-test.sh && ./final-test.sh
