@@ -35,8 +35,168 @@ systemctl start x-ui
 sleep 4
 systemctl stop x-ui
 
+# --- Заглушка (Веб-интерфейс ИИ) ---
 mkdir -p /var/www/decoy /var/www/certbot
-echo '<h1>Welcome</h1>' > /var/www/decoy/index.html
+cat > /var/www/decoy/index.html <<'EOF'
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Assistant - Sign In</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0d0d12;
+            color: #ececec;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        body::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background-image: radial-gradient(circle at 50% 0%, #1e1e2e 0%, #0d0d12 70%);
+            z-index: -1;
+        }
+        .login-container {
+            width: 100%;
+            max-width: 400px;
+            padding: 40px;
+            background-color: #15151e;
+            border: 1px solid #2a2a35;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            text-align: center;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: 700;
+            margin-bottom: 30px;
+            letter-spacing: 0.5px;
+            color: #ffffff;
+        }
+        .logo span { color: #10a37f; }
+        h2 {
+            font-size: 20px;
+            font-weight: 500;
+            margin-bottom: 24px;
+        }
+        .form-group {
+            margin-bottom: 16px;
+            text-align: left;
+        }
+        label {
+            display: block;
+            font-size: 13px;
+            color: #a1a1aa;
+            margin-bottom: 6px;
+        }
+        input[type="text"], input[type="password"] {
+            width: 100%;
+            padding: 12px 14px;
+            background-color: #1e1e2b;
+            border: 1px solid #333344;
+            border-radius: 8px;
+            color: #ffffff;
+            font-size: 15px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input:focus {
+            border-color: #10a37f;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            background-color: #10a37f;
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-top: 24px;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #0d8a6b;
+        }
+        .error-msg {
+            color: #ef4444;
+            font-size: 14px;
+            margin-top: 16px;
+            display: none;
+            text-align: center;
+            background: rgba(239, 68, 68, 0.1);
+            padding: 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+        .links {
+            margin-top: 24px;
+            font-size: 13px;
+        }
+        .links a {
+            color: #10a37f;
+            text-decoration: none;
+            margin: 0 10px;
+        }
+        .links a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+
+<div class="login-container">
+    <div class="logo">AI <span>Assistant</span></div>
+    <h2>Welcome back</h2>
+
+    <form id="loginForm">
+        <div class="form-group">
+            <label>Email address</label>
+            <input type="text" id="email" placeholder="name@example.com" required>
+        </div>
+        <div class="form-group">
+            <label>Password</label>
+            <input type="password" id="password" placeholder="••••••••" required>
+        </div>
+        <button type="submit">Continue</button>
+        <div id="errorBox" class="error-msg">Authentication failed. Please check your credentials.</div>
+    </form>
+
+    <div class="links">
+        <a href="#">Forgot password?</a>
+        <a href="#">Sign up</a>
+    </div>
+</div>
+
+<script>
+    document.getElementById('loginForm').addEventListener('submit', function(e) {
+        e.preventDefault();
+        var btn = document.querySelector('button');
+        var err = document.getElementById('errorBox');
+        
+        btn.innerText = "Authenticating...";
+        btn.disabled = true;
+        err.style.display = 'none';
+
+        setTimeout(function() {
+            btn.innerText = "Continue";
+            btn.disabled = false;
+            err.style.display = 'block';
+            err.innerText = "Server error: Authentication service unavailable. Try again later.";
+        }, 1500);
+    });
+</script>
+
+</body>
+</html>
+EOF
+
 CERT_PATH="/etc/letsencrypt/live/$DOMAIN/fullchain.pem"
 KEY_PATH="/etc/letsencrypt/live/$DOMAIN/privkey.pem"
 
@@ -186,27 +346,48 @@ print("DB OK")
 PYEOF
 
 if echo "$PROTOCOLS" | grep -qw "1"; then
-  LISTEN="listen 127.0.0.1:${NGINX_PORT} ssl http2;"
+  LISTEN_NGINX="listen 127.0.0.1:${NGINX_PORT} ssl http2;"
 else
-  LISTEN="listen 443 ssl http2;"
+  LISTEN_NGINX="listen 443 ssl http2;"
 fi
-cat > /etc/nginx/sites-available/decoy <<NGINXEOF
-server {
+
+FALLBACK_CONFIG="server {
     listen 80; server_name $DOMAIN;
     location /.well-known/acme-challenge/ { root /var/www/certbot; }
     location / { return 301 https://\$host\$request_uri; }
-}
+}"
+
+cat > /etc/nginx/sites-available/decoy <<NGINXEOF
+$FALLBACK_CONFIG
 server {
-    $LISTEN
+    $LISTEN_NGINX
     server_name $DOMAIN;
-    ssl_certificate     $CERT_PATH;
+    ssl_certificate $CERT_PATH;
     ssl_certificate_key $KEY_PATH;
-    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    set_real_ip_from 127.0.0.1; real_ip_header X-Forwarded-For;
+    
     location / { root /var/www/decoy; index index.html; }
-    location $WEB_PATH { proxy_pass http://127.0.0.1:$PANEL_PORT; proxy_http_version 1.1; proxy_set_header Upgrade \$http_upgrade; proxy_set_header Connection "upgrade"; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; proxy_read_timeout 86400; }
-    location $SUB_PATH { proxy_pass http://127.0.0.1:$SUB_PORT; proxy_set_header Host \$host; proxy_set_header X-Real-IP \$remote_addr; proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; proxy_set_header X-Forwarded-Proto \$scheme; }
+    location $WEB_PATH { 
+        proxy_pass http://127.0.0.1:$PANEL_PORT; 
+        proxy_http_version 1.1; 
+        proxy_set_header Upgrade \$http_upgrade; 
+        proxy_set_header Connection "upgrade"; 
+        proxy_set_header Host \$host; 
+        proxy_set_header X-Real-IP \$remote_addr; 
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto \$scheme; 
+    }
+    location $SUB_PATH { 
+        proxy_pass http://127.0.0.1:$SUB_PORT; 
+        proxy_set_header Host \$host; 
+        proxy_set_header X-Real-IP \$remote_addr; 
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for; 
+        proxy_set_header X-Forwarded-Proto \$scheme; 
+    }
 }
 NGINXEOF
+
 rm -f /etc/nginx/sites-enabled/default
 ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
 nginx -t && systemctl restart nginx
@@ -227,7 +408,7 @@ ss -tlnp | grep -E ':(443|40000)\b' || true
 echo ""
 sqlite3 /etc/x-ui/x-ui.db "SELECT id,remark,port,protocol FROM inbounds;"
 echo ""
-echo "--- Тест Fallback ---"
+echo "--- Тест Fallback (Заглушка) ---"
 curl -kI "https://$DOMAIN/" 2>&1 | head -n 3
 echo ""
 echo "--- Тест Панели ---"
