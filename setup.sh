@@ -210,7 +210,7 @@ server {
 EOF
 ln -sf /etc/nginx/sites-available/decoy /etc/nginx/sites-enabled/decoy
 systemctl restart nginx
-certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" || true
+certbot certonly --webroot -w /var/www/certbot -d "$DOMAIN" --non-interactive --agree-tos -m "admin@$DOMAIN" --deploy-hook "systemctl reload nginx" || true
 
 if [ ! -f "$CERT_PATH" ]; then
   mkdir -p /etc/ssl/self-signed
