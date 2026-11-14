@@ -364,7 +364,13 @@ server {
     server_name $DOMAIN;
     ssl_certificate $CERT_PATH;
     ssl_certificate_key $KEY_PATH;
-    ssl_protocols TLSv1.2 TLSv1.3;
+    
+    # --- ИСПРАВЛЕНИЕ ДЛЯ REALITY ---
+    ssl_protocols TLSv1.3;
+    ssl_ecdh_curve X25519;
+    ssl_conf_command Ciphersuites TLS_AES_128_GCM_SHA256:TLS_AES_256_GCM_SHA384:TLS_CHACHA20_POLY1305_SHA256;
+    # -------------------------------
+
     set_real_ip_from 127.0.0.1; real_ip_header X-Forwarded-For;
     
     location / { root /var/www/decoy; index index.html; }
