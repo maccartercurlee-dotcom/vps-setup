@@ -223,7 +223,7 @@ export DB_DOMAIN="$DOMAIN" DB_PANEL_PORT="$PANEL_PORT" DB_WEB_PATH="$WEB_PATH"
 export DB_SUB_PORT="$SUB_PORT" DB_SUB_PATH="$SUB_PATH" DB_CERT_PATH="$CERT_PATH"
 export DB_KEY_PATH="$KEY_PATH" DB_PROTOCOLS="$PROTOCOLS"
 
-echo -e "${YELLOW}Заполнение базы (с полными JSON)...${NC}"
+echo -e "${YELLOW}Заполнение базы (с новыми JSON)...${NC}"
 python3 << 'PYEOF'
 import os, sqlite3, json, secrets, uuid, subprocess, time
 DOMAIN=os.environ['DB_DOMAIN']; PANEL_PORT=os.environ['DB_PANEL_PORT']
@@ -260,38 +260,91 @@ if "1" in PROTOCOLS:
     
     vless_settings = {"clients": vc, "decryption": "none", "encryption": "none"}
     
+    # ВАШ НОВЫЙ JSON
     vless_stream = {
         "network": "xhttp",
         "xhttpSettings": {
-            "path": "/api/v3/stream", "host": "", "mode": "stream-one",
-            "xPaddingBytes": "100-1000", "xPaddingObfsMode": False, "xPaddingKey": "",
-            "xPaddingHeader": "", "xPaddingPlacement": "", "xPaddingMethod": "",
-            "sessionIDPlacement": "", "sessionIDKey": "", "sessionIDTable": "",
-            "sessionIDLength": "", "seqPlacement": "", "seqKey": "",
-            "uplinkDataPlacement": "", "uplinkDataKey": "", "scMaxEachPostBytes": "",
-            "noSSEHeader": False, "scMaxBufferedPosts": 30, "scStreamUpServerSecs": "20-80",
-            "serverMaxHeaderBytes": 0, "uplinkHTTPMethod": "", "headers": {},
-            "scMinPostsIntervalMs": "", "uplinkChunkSize": 0, "noGRPCHeader": False,
-            "enableXmux": False
+            "path": "/api/v1/ws",
+            "host": "",
+            "mode": "stream-one",
+            "xPaddingBytes": "10-100",
+            "xPaddingObfsMode": True,
+            "xPaddingKey": "",
+            "xPaddingHeader": "",
+            "xPaddingPlacement": "cookie",
+            "xPaddingMethod": "repeat-x",
+            "sessionIDPlacement": "",
+            "sessionIDKey": "",
+            "sessionIDTable": "Base62",
+            "sessionIDLength": "8-16",
+            "seqPlacement": "",
+            "seqKey": "",
+            "uplinkDataPlacement": "",
+            "uplinkDataKey": "",
+            "scMaxEachPostBytes": "",
+            "noSSEHeader": False,
+            "scMaxBufferedPosts": 30,
+            "scStreamUpServerSecs": "20-80",
+            "serverMaxHeaderBytes": 0,
+            "uplinkHTTPMethod": "POST",
+            "headers": {
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
+                "Accept-Language": "en-US,en;q=0.5",
+                "Accept": "text/event-stream"
+            },
+            "scMinPostsIntervalMs": "",
+            "uplinkChunkSize": 0,
+            "noGRPCHeader": False,
+            "xmux": {
+                "maxConcurrency": "16-32",
+                "maxConnections": 0,
+                "cMaxReuseTimes": 0,
+                "hMaxRequestTimes": "600-900",
+                "hMaxReusableSecs": "1800-3000",
+                "hKeepAlivePeriod": 0
+            },
+            "enableXmux": True
         },
         "security": "reality",
         "realitySettings": {
-            "show": False, "xver": 0, "target": "127.0.0.1:40000",
-            "serverNames": [DOMAIN], "privateKey": pk,
-            "minClientVer": "", "maxClientVer": "", "maxTimediff": 0,
-            "shortIds": shorts, "mldsa65Seed": "",
+            "show": False,
+            "xver": 0,
+            "target": "127.0.0.1:40000",
+            "serverNames": [DOMAIN],
+            "privateKey": pk,
+            "minClientVer": "",
+            "maxClientVer": "",
+            "maxTimediff": 0,
+            "shortIds": shorts,
+            "mldsa65Seed": "",
             "settings": {
-                "publicKey": pub, "fingerprint": "firefox",
-                "serverName": "", "spiderX": spider, "mldsa65Verify": ""
+                "publicKey": pub,
+                "fingerprint": "firefox",
+                "serverName": "",
+                "spiderX": spider,
+                "mldsa65Verify": ""
             }
         },
         "sockopt": {
-            "tcpFastOpen": True, "tcpcongestion": "bbr", "acceptProxyProtocol": False,
-            "mark": 0, "tproxy": "off", "tcpMptcp": False, "penetrate": False,
-            "domainStrategy": "AsIs", "tcpMaxSeg": 0, "dialerProxy": "",
-            "tcpKeepAliveInterval": 0, "tcpKeepAliveIdle": 0, "tcpUserTimeout": 0,
-            "V6Only": False, "tcpWindowClamp": 0, "interface": "",
-            "trustedXForwardedFor": [], "addressPortStrategy": "none", "customSockopt": []
+            "tcpFastOpen": True,
+            "tcpcongestion": "bbr",
+            "acceptProxyProtocol": False,
+            "mark": 0,
+            "tproxy": "off",
+            "tcpMptcp": False,
+            "penetrate": False,
+            "domainStrategy": "AsIs",
+            "tcpMaxSeg": 0,
+            "dialerProxy": "",
+            "tcpKeepAliveInterval": 0,
+            "tcpKeepAliveIdle": 0,
+            "tcpUserTimeout": 0,
+            "V6Only": False,
+            "tcpWindowClamp": 0,
+            "interface": "",
+            "trustedXForwardedFor": [],
+            "addressPortStrategy": "none",
+            "customSockopt": []
         }
     }
     c.execute("INSERT INTO inbounds (user_id,up,down,total,expiry_time,remark,port,protocol,settings,stream_settings,tag,sniffing,enable) VALUES (1,0,0,0,0,'VLESS-REALITY',443,'vless',?,?,'in-443-tcp',?,1)",(json.dumps(vless_settings),json.dumps(vless_stream),'{"enabled":true,"destOverride":["http","tls","quic","fakedns"]}'))
