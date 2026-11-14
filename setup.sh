@@ -260,91 +260,47 @@ if "1" in PROTOCOLS:
     
     vless_settings = {"clients": vc, "decryption": "none", "encryption": "none"}
     
-    # ВАШ НОВЫЙ JSON
     vless_stream = {
         "network": "xhttp",
         "xhttpSettings": {
-            "path": "/api/v1/ws",
-            "host": "",
-            "mode": "stream-one",
-            "xPaddingBytes": "10-100",
-            "xPaddingObfsMode": True,
-            "xPaddingKey": "",
-            "xPaddingHeader": "",
-            "xPaddingPlacement": "cookie",
-            "xPaddingMethod": "repeat-x",
-            "sessionIDPlacement": "",
-            "sessionIDKey": "",
-            "sessionIDTable": "Base62",
-            "sessionIDLength": "8-16",
-            "seqPlacement": "",
-            "seqKey": "",
-            "uplinkDataPlacement": "",
-            "uplinkDataKey": "",
-            "scMaxEachPostBytes": "",
-            "noSSEHeader": False,
-            "scMaxBufferedPosts": 30,
-            "scStreamUpServerSecs": "20-80",
-            "serverMaxHeaderBytes": 0,
-            "uplinkHTTPMethod": "POST",
+            "path": "/api/v1/ws", "host": "", "mode": "stream-one",
+            "xPaddingBytes": "10-100", "xPaddingObfsMode": True, "xPaddingKey": "",
+            "xPaddingHeader": "", "xPaddingPlacement": "cookie", "xPaddingMethod": "repeat-x",
+            "sessionIDPlacement": "", "sessionIDKey": "", "sessionIDTable": "Base62",
+            "sessionIDLength": "8-16", "seqPlacement": "", "seqKey": "",
+            "uplinkDataPlacement": "", "uplinkDataKey": "", "scMaxEachPostBytes": "",
+            "noSSEHeader": False, "scMaxBufferedPosts": 30, "scStreamUpServerSecs": "20-80",
+            "serverMaxHeaderBytes": 0, "uplinkHTTPMethod": "POST",
             "headers": {
                 "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:128.0) Gecko/20100101 Firefox/128.0",
                 "Accept-Language": "en-US,en;q=0.5",
                 "Accept": "text/event-stream"
             },
-            "scMinPostsIntervalMs": "",
-            "uplinkChunkSize": 0,
-            "noGRPCHeader": False,
+            "scMinPostsIntervalMs": "", "uplinkChunkSize": 0, "noGRPCHeader": False,
             "xmux": {
-                "maxConcurrency": "16-32",
-                "maxConnections": 0,
-                "cMaxReuseTimes": 0,
-                "hMaxRequestTimes": "600-900",
-                "hMaxReusableSecs": "1800-3000",
-                "hKeepAlivePeriod": 0
+                "maxConcurrency": "16-32", "maxConnections": 0, "cMaxReuseTimes": 0,
+                "hMaxRequestTimes": "600-900", "hMaxReusableSecs": "1800-3000", "hKeepAlivePeriod": 0
             },
             "enableXmux": True
         },
         "security": "reality",
         "realitySettings": {
-            "show": False,
-            "xver": 0,
-            "target": "127.0.0.1:40000",
-            "serverNames": [DOMAIN],
-            "privateKey": pk,
-            "minClientVer": "",
-            "maxClientVer": "",
-            "maxTimediff": 0,
-            "shortIds": shorts,
-            "mldsa65Seed": "",
+            "show": False, "xver": 0, "target": "127.0.0.1:40000",
+            "serverNames": [DOMAIN], "privateKey": pk,
+            "minClientVer": "", "maxClientVer": "", "maxTimediff": 0,
+            "shortIds": shorts, "mldsa65Seed": "",
             "settings": {
-                "publicKey": pub,
-                "fingerprint": "firefox",
-                "serverName": "",
-                "spiderX": spider,
-                "mldsa65Verify": ""
+                "publicKey": pub, "fingerprint": "firefox",
+                "serverName": "", "spiderX": spider, "mldsa65Verify": ""
             }
         },
         "sockopt": {
-            "tcpFastOpen": True,
-            "tcpcongestion": "bbr",
-            "acceptProxyProtocol": False,
-            "mark": 0,
-            "tproxy": "off",
-            "tcpMptcp": False,
-            "penetrate": False,
-            "domainStrategy": "AsIs",
-            "tcpMaxSeg": 0,
-            "dialerProxy": "",
-            "tcpKeepAliveInterval": 0,
-            "tcpKeepAliveIdle": 0,
-            "tcpUserTimeout": 0,
-            "V6Only": False,
-            "tcpWindowClamp": 0,
-            "interface": "",
-            "trustedXForwardedFor": [],
-            "addressPortStrategy": "none",
-            "customSockopt": []
+            "tcpFastOpen": True, "tcpcongestion": "bbr", "acceptProxyProtocol": False,
+            "mark": 0, "tproxy": "off", "tcpMptcp": False, "penetrate": False,
+            "domainStrategy": "AsIs", "tcpMaxSeg": 0, "dialerProxy": "",
+            "tcpKeepAliveInterval": 0, "tcpKeepAliveIdle": 0, "tcpUserTimeout": 0,
+            "V6Only": False, "tcpWindowClamp": 0, "interface": "",
+            "trustedXForwardedFor": [], "addressPortStrategy": "none", "customSockopt": []
         }
     }
     c.execute("INSERT INTO inbounds (user_id,up,down,total,expiry_time,remark,port,protocol,settings,stream_settings,tag,sniffing,enable) VALUES (1,0,0,0,0,'VLESS-REALITY',443,'vless',?,?,'in-443-tcp',?,1)",(json.dumps(vless_settings),json.dumps(vless_stream),'{"enabled":true,"destOverride":["http","tls","quic","fakedns"]}'))
@@ -353,31 +309,11 @@ if "1" in PROTOCOLS:
 # --- Hysteria2 ---
 if "2" in PROTOCOLS:
     hc=[{"id":x["uuid"],"email":x["name"],"subId":x["sub"],"auth":x["uuid"],"password":x["uuid"],"flow":"","security":"auto","limitIp":0,"totalGB":0,"expiryTime":0,"enable":True,"tgId":0,"reset":0,"resetDay":0,"resetWeekday":0,"resetMax":0,"comment":"","created_at":now,"updated_at":now} for x in cd]
-    
     hy_settings = {"clients": hc, "version": 2}
-    
     hy_stream = {
-        "network": "hysteria",
-        "hysteriaSettings": {
-            "version": 2, "udpIdleTimeout": 60,
-            "masquerade": {"type": "proxy", "url": f"https://{DOMAIN}/", "rewriteHost": True}
-        },
-        "security": "tls",
-        "tlsSettings": {
-            "serverName": DOMAIN, "minVersion": "1.3", "maxVersion": "1.3",
-            "certificates": [{"certificateFile": CERT_PATH, "keyFile": KEY_PATH, "useFile": True}],
-            "alpn": ["h3"],
-            "settings": {"fingerprint": "firefox", "echConfigList": "", "echServerKeys": ""}
-        },
-        "finalmask": {
-            "quicParams": {
-                "congestion": "bbr", "debug": False, "maxIdleTimeout": 30,
-                "keepAlivePeriod": 10, "disablePathMTUDiscovery": False,
-                "maxIncomingStreams": 2048, "initStreamReceiveWindow": 16777216,
-                "maxStreamReceiveWindow": 16777216, "initConnectionReceiveWindow": 33554432,
-                "maxConnectionReceiveWindow": 33554432, "bbrProfile": "aggressive"
-            }
-        }
+        "network": "hysteria", "hysteriaSettings": {"version": 2, "udpIdleTimeout": 60, "masquerade": {"type": "proxy", "url": f"https://{DOMAIN}/", "rewriteHost": True}},
+        "security": "tls", "tlsSettings": {"serverName": DOMAIN, "minVersion": "1.3", "maxVersion": "1.3", "certificates": [{"certificateFile": CERT_PATH, "keyFile": KEY_PATH, "useFile": True}], "alpn": ["h3"], "settings": {"fingerprint": "firefox", "echConfigList": "", "echServerKeys": ""}},
+        "finalmask": {"quicParams": {"congestion": "bbr", "debug": False, "maxIdleTimeout": 30, "keepAlivePeriod": 10, "disablePathMTUDiscovery": False, "maxIncomingStreams": 2048, "initStreamReceiveWindow": 16777216, "maxStreamReceiveWindow": 16777216, "initConnectionReceiveWindow": 33554432, "maxConnectionReceiveWindow": 33554432, "bbrProfile": "aggressive"}}
     }
     c.execute("INSERT INTO inbounds (user_id,up,down,total,expiry_time,remark,port,protocol,settings,stream_settings,tag,sniffing,enable) VALUES (1,0,0,0,0,'Hysteria2',443,'hysteria',?,?,'in-443-udp',?,1)",(json.dumps(hy_settings),json.dumps(hy_stream),'{"enabled":true,"destOverride":["http","tls"]}'))
     hy_id=c.lastrowid
@@ -460,15 +396,3 @@ echo -e "${GREEN}=== ГОТОВО ===${NC}"
 echo "Логин: $PANEL_USER | Пароль: $PANEL_PASS"
 echo "Панель:   https://$DOMAIN$WEB_PATH"
 echo "Подписки: https://$DOMAIN$SUB_PATH"
-echo ""
-x-ui status
-echo ""
-ss -tlnp | grep -E ':(443|40000)\b' || true
-echo ""
-sqlite3 /etc/x-ui/x-ui.db "SELECT id,remark,port,protocol FROM inbounds;"
-echo ""
-echo "--- Тест Fallback (Заглушка) ---"
-curl -kI "https://$DOMAIN/" 2>&1 | head -n 3
-echo ""
-echo "--- Тест Панели ---"
-curl -kI "https://$DOMAIN$WEB_PATH" 2>&1 | head -n 3
